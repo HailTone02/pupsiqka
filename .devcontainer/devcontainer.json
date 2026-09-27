@@ -1,0 +1,15 @@
+{
+  "name": "PupsikCall Android",
+  "features": {
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "21"
+    }
+  },
+  "remoteEnv": {
+    "JAVA_HOME": "/usr/local/sdkman/candidates/java/current",
+    "PATH": "/usr/local/sdkman/candidates/java/current/bin:${containerEnv:PATH}",
+    "ANDROID_HOME": "${containerEnv:HOME}/.android-sdk",
+    "ANDROID_SDK_ROOT": "${containerEnv:HOME}/.android-sdk"
+  },
+  "postCreateCommand": "bash .devcontainer/setup-java.sh && bash .devcontainer/setup-android-sdk.sh"
+}

@@ -1,0 +1,28 @@
+# Gradle and Android build outputs
+.gradle/
+**/build/
+.kotlin/
+.cxx/
+captures/
+
+# Local Android SDK configuration
+local.properties
+
+# IDE-generated files
+.idea/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+
+# Operating system files
+.DS_Store
