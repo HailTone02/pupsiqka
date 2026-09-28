@@ -7,9 +7,9 @@
   },
   "remoteEnv": {
     "JAVA_HOME": "/usr/local/sdkman/candidates/java/current",
-    "PATH": "/usr/local/sdkman/candidates/java/current/bin:${containerEnv:PATH}",
-    "ANDROID_HOME": "${containerEnv:HOME}/.android-sdk",
-    "ANDROID_SDK_ROOT": "${containerEnv:HOME}/.android-sdk"
+    "PATH": "/usr/local/sdkman/candidates/java/current/bin:/home/codespace/.android-sdk/cmdline-tools/latest/bin:/home/codespace/.android-sdk/platform-tools:${containerEnv:PATH}",
+    "ANDROID_HOME": "/home/codespace/.android-sdk",
+    "ANDROID_SDK_ROOT": "/home/codespace/.android-sdk"
   },
   "postCreateCommand": "bash .devcontainer/setup-java.sh && bash .devcontainer/setup-android-sdk.sh"
 }
