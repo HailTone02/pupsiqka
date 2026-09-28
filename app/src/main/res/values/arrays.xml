@@ -1,0 +1,22 @@
+<resources>
+    <string-array name="supported_language_codes">
+        <item>en</item>
+        <item>ru</item>
+        <item>sq</item>
+        <item>de</item>
+        <item>tr</item>
+        <item>ar</item>
+        <item>it</item>
+        <item>fr</item>
+    </string-array>
+    <string-array name="supported_language_names">
+        <item>English</item>
+        <item>Русский</item>
+        <item>Shqip</item>
+        <item>Deutsch</item>
+        <item>Türkçe</item>
+        <item>العربية</item>
+        <item>Italiano</item>
+        <item>Français</item>
+    </string-array>
+</resources>

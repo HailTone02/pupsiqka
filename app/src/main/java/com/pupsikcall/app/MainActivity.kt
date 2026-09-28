@@ -1,9 +1,15 @@
 package com.pupsikcall.app
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import android.util.Log
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,7 +32,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
@@ -34,6 +40,9 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,8 +53,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -61,14 +75,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringArrayResource
+import androidx.compose.ui.res.stringResource
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import java.util.UUID
+import kotlinx.coroutines.launch
 
 private val AppBackground = Color(0xFF111015)
 private val AppSurface = Color(0xFF1D1B23)
@@ -80,10 +101,30 @@ private val OnlineGreen = Color(0xFF32D583)
 private val DeclineRed = Color(0xFFFF5364)
 private val MainText = Color(0xFFF8F7FA)
 private val SecondaryText = Color(0xFFA29EAA)
+private const val PermissionLogTag = "PupsikCallPermission"
+
+private fun AuthMessage.stringResourceId(): Int = when (this) {
+    AuthMessage.CONFIRMATION_REQUIRED -> R.string.auth_confirmation_required
+    AuthMessage.CONFIGURATION_MISSING -> R.string.auth_configuration_missing
+    AuthMessage.SESSION_RESTORE_FAILED -> R.string.auth_session_restore_failed
+    AuthMessage.INVALID_EMAIL -> R.string.auth_invalid_email
+    AuthMessage.PASSWORD_REQUIRED -> R.string.auth_password_required
+    AuthMessage.WEAK_PASSWORD -> R.string.auth_weak_password
+    AuthMessage.DUPLICATE_ACCOUNT -> R.string.auth_duplicate_account
+    AuthMessage.INVALID_CREDENTIALS -> R.string.auth_invalid_credentials
+    AuthMessage.EMAIL_NOT_CONFIRMED -> R.string.auth_email_not_confirmed
+    AuthMessage.SIGNUP_DISABLED -> R.string.auth_signup_disabled
+    AuthMessage.RATE_LIMITED -> R.string.auth_rate_limited
+    AuthMessage.NETWORK_ERROR -> R.string.auth_network_error
+    AuthMessage.REGISTER_FAILED -> R.string.auth_register_failed
+    AuthMessage.LOGIN_FAILED -> R.string.auth_login_failed
+    AuthMessage.LOGIN_UNVERIFIED -> R.string.auth_login_unverified
+    AuthMessage.LOGOUT_FAILED -> R.string.auth_logout_failed
+}
 
 private enum class DemoScreen { SignIn, Contacts, IncomingCall, ActiveCall }
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -102,12 +143,370 @@ private fun PupsikCallApp() {
     var screen by rememberSaveable { mutableStateOf(DemoScreen.SignIn) }
     var isMuted by rememberSaveable { mutableStateOf(false) }
     var speakerEnabled by rememberSaveable { mutableStateOf(true) }
+    var callState by remember { mutableStateOf(WebRtcCallState.IDLE) }
+    var callError by remember { mutableStateOf<String?>(null) }
+    var iceDiagnostics by remember { mutableStateOf("") }
+    var engine by remember { mutableStateOf<WebRtcAudioCallEngine?>(null) }
+    var currentCallId by remember { mutableStateOf<String?>(null) }
+    var peerDeviceId by remember { mutableStateOf<String?>(null) }
+    var pendingRemoteOffer by remember { mutableStateOf<String?>(null) }
+    var pendingRemoteIce by remember { mutableStateOf(emptyList<LocalIceCandidate>()) }
+    var peerOnline by remember { mutableStateOf(false) }
+    var calleeAccepted by remember { mutableStateOf(false) }
+    var signalingInstance: SupabaseCallSignaling? by remember { mutableStateOf(null) }
+    val context = LocalContext.current
+    val deviceId = BuildConfig.PUPSIKCALL_DEVICE_ID.ifBlank { "pupsik-a" }
+    val languageCodes = stringArrayResource(R.array.supported_language_codes).toList()
+    val languageNames = stringArrayResource(R.array.supported_language_names).toList()
+    val applicationLocaleTags = AppCompatDelegate.getApplicationLocales().toLanguageTags()
+    val systemLocaleTag = LocalConfiguration.current.locales.get(0)?.toLanguageTag().orEmpty()
+    val selectedLanguageIndex = selectedLanguageIndex(languageCodes, applicationLocaleTags, systemLocaleTag)
+    val signaling = remember {
+        var signalingRef: SupabaseCallSignaling? = null
+        val newSignaling = SupabaseCallSignaling(
+            deviceId = deviceId,
+            supabaseUrl = BuildConfig.SUPABASE_URL,
+            supabaseKey = BuildConfig.SUPABASE_PUBLISHABLE_KEY,
+            listener = object : SupabaseCallSignaling.Listener {
+                override fun onCallInvite(callId: String, fromDeviceId: String, toDeviceId: String) {
+                    if (currentCallId != null && currentCallId != callId) return
+                    callError = null
+                    calleeAccepted = false
+                    currentCallId = callId
+                    peerDeviceId = fromDeviceId
+                    signalingRef?.prepareCall(callId)
+                    screen = DemoScreen.IncomingCall
+                }
 
-    BackHandler(enabled = screen != DemoScreen.SignIn) {
-        screen = when (screen) {
-            DemoScreen.ActiveCall, DemoScreen.IncomingCall -> DemoScreen.Contacts
-            DemoScreen.Contacts -> DemoScreen.SignIn
-            DemoScreen.SignIn -> DemoScreen.SignIn
+                override fun onCallAccepted(callId: String, fromDeviceId: String) {
+                    if (currentCallId != callId || peerDeviceId != fromDeviceId) return
+                    engine?.startOffer()
+                }
+
+                override fun onCallDeclined(callId: String, fromDeviceId: String) {
+                    if (currentCallId == callId && peerDeviceId == fromDeviceId) {
+                        currentCallId = null
+                        peerDeviceId = null
+                        pendingRemoteOffer = null
+                        pendingRemoteIce = emptyList()
+                        engine?.dispose("peer declined")
+                        engine = null
+                        callState = WebRtcCallState.IDLE
+                        callError = null
+                        screen = DemoScreen.Contacts
+                    }
+                }
+
+                override fun onCallEnded(callId: String, fromDeviceId: String) {
+                    if (currentCallId == callId && peerDeviceId == fromDeviceId) {
+                        currentCallId = null
+                        peerDeviceId = null
+                        pendingRemoteOffer = null
+                        pendingRemoteIce = emptyList()
+                        engine?.dispose("peer ended call")
+                        engine = null
+                        callState = WebRtcCallState.IDLE
+                        callError = null
+                        screen = DemoScreen.Contacts
+                    }
+                }
+
+                override fun onRemoteOffer(callId: String, fromDeviceId: String, sdp: String) {
+                    if (currentCallId != null && currentCallId != callId) return
+                    currentCallId = callId
+                    peerDeviceId = fromDeviceId
+                    if (screen != DemoScreen.ActiveCall) {
+                        pendingRemoteOffer = sdp
+                        screen = DemoScreen.IncomingCall
+                        return
+                    }
+                    if (engine == null) {
+                        val incomingEngine = WebRtcAudioCallEngine(context.applicationContext, deviceId, callId, object : WebRtcAudioCallEngine.Listener {
+                            override fun onStateChanged(state: WebRtcCallState, error: String?) {
+                                callState = state
+                                callError = error
+                                if (state == WebRtcCallState.CONNECTED) signalingRef?.markConnected(callId)
+                            }
+
+                            override fun onLocalDescription(type: String, sdp: String) {
+                                if (type == "offer") {
+                                    signalingRef?.sendOffer(callId, fromDeviceId, sdp)
+                                } else if (type == "answer") {
+                                    signalingRef?.sendAnswer(callId, fromDeviceId, sdp)
+                                }
+                            }
+
+                            override fun onLocalIceCandidate(candidate: LocalIceCandidate) {
+                                signalingRef?.sendIceCandidate(callId, fromDeviceId, candidate)
+                            }
+
+                            override fun onIceDiagnosticsChanged(diagnostic: String) {
+                                iceDiagnostics = diagnostic
+                            }
+                        })
+                        engine = incomingEngine
+                        incomingEngine.prepareForRemoteOffer()
+                        incomingEngine.setMuted(isMuted)
+                        incomingEngine.setSpeakerEnabled(speakerEnabled)
+                        pendingRemoteIce.forEach(incomingEngine::addRemoteIceCandidate)
+                        pendingRemoteIce = emptyList()
+                    }
+                    pendingRemoteOffer = null
+                    engine?.applyRemoteOffer(sdp)
+                }
+
+                override fun onRemoteAnswer(callId: String, fromDeviceId: String, sdp: String) {
+                    if (currentCallId != callId || peerDeviceId != fromDeviceId) return
+                    engine?.applyRemoteAnswer(sdp)
+                    screen = DemoScreen.ActiveCall
+                }
+
+                override fun onRemoteIceCandidate(callId: String, fromDeviceId: String, candidate: LocalIceCandidate) {
+                    if (currentCallId != callId || peerDeviceId != fromDeviceId) return
+                    val activeEngine = engine
+                    if (activeEngine != null) {
+                        activeEngine.addRemoteIceCandidate(candidate)
+                    } else {
+                        pendingRemoteIce = pendingRemoteIce + candidate
+                    }
+                }
+
+                override fun onPeerPresenceChanged(peerDeviceId: String, online: Boolean) {
+                    val expectedPeer = if (deviceId == "pupsik-a") "pupsik-b" else "pupsik-a"
+                    if (peerDeviceId == expectedPeer) peerOnline = online
+                }
+
+                override fun onSignalError(message: String) {
+                    val updatedStatus = CallUiStatus(callState, callError).withSignalError(message)
+                    callState = updatedStatus.state
+                    callError = updatedStatus.error
+                }
+            },
+        )
+        signalingRef = newSignaling
+        signalingInstance = newSignaling
+        newSignaling
+    }
+    val authController = remember(signaling) { SupabaseAuthController(signaling.authClient) }
+    val authState by authController.state.collectAsState()
+    val localizedAuthMessage = authState.message?.let { stringResource(it.stringResourceId()) }
+    val authScope = rememberCoroutineScope()
+
+    val startLocalCall = fun() {
+        val targetDevice = if (deviceId == "pupsik-a") "pupsik-b" else "pupsik-a"
+        val newCallId = UUID.randomUUID().toString()
+        if (engine != null) {
+            engine?.dispose("replaced by a new call")
+        }
+        val callEngine = WebRtcAudioCallEngine(context.applicationContext, deviceId, newCallId, object : WebRtcAudioCallEngine.Listener {
+            override fun onStateChanged(state: WebRtcCallState, error: String?) {
+                callState = state
+                callError = error
+                if (state == WebRtcCallState.CONNECTED) signaling.markConnected(newCallId)
+            }
+
+            override fun onLocalDescription(type: String, sdp: String) {
+                if (type == "offer") {
+                    signaling.sendOffer(newCallId, targetDevice, sdp)
+                } else if (type == "answer") {
+                    signaling.sendAnswer(newCallId, targetDevice, sdp)
+                }
+            }
+
+            override fun onLocalIceCandidate(candidate: LocalIceCandidate) {
+                signaling.sendIceCandidate(newCallId, targetDevice, candidate)
+            }
+
+            override fun onIceDiagnosticsChanged(diagnostic: String) {
+                iceDiagnostics = diagnostic
+            }
+        })
+        currentCallId = newCallId
+        peerDeviceId = targetDevice
+        engine = callEngine
+        callEngine.setMuted(isMuted)
+        callEngine.setSpeakerEnabled(speakerEnabled)
+        screen = DemoScreen.ActiveCall
+        signaling.startCall(newCallId, targetDevice)
+    }
+
+    val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        Log.i(PermissionLogTag, "deviceId=$deviceId microphonePermission=${if (granted) "granted" else "denied"} purpose=caller")
+        if (granted) {
+            callError = null
+            startLocalCall()
+        } else {
+            callState = WebRtcCallState.FAILED
+            callError = context.getString(R.string.microphone_permission_error)
+        }
+    }
+    val requestCall = fun() {
+        val granted = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        Log.i(PermissionLogTag, "deviceId=$deviceId microphonePermission=${if (granted) "granted" else "not-granted"} purpose=caller")
+        if (granted) {
+            callError = null
+            startLocalCall()
+        } else {
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    val rejectAnswerForPermission = fun() {
+        val activeCallId = currentCallId
+        val activePeer = peerDeviceId
+        if (activeCallId != null && activePeer != null) signaling.declineCall(activeCallId, activePeer)
+        engine?.dispose("callee microphone permission denied")
+        engine = null
+        currentCallId = null
+        peerDeviceId = null
+        pendingRemoteOffer = null
+        pendingRemoteIce = emptyList()
+        calleeAccepted = false
+        callState = WebRtcCallState.FAILED
+        callError = context.getString(R.string.microphone_permission_error)
+        screen = DemoScreen.Contacts
+    }
+
+    val completeAnswer = fun() {
+        val activeCallId = currentCallId ?: return
+        val activePeer = peerDeviceId ?: return
+        val permissionGranted = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        Log.i(PermissionLogTag, "deviceId=$deviceId callId=$activeCallId microphonePermission=${if (permissionGranted) "granted" else "denied"} purpose=callee")
+        if (!permissionGranted) {
+            rejectAnswerForPermission()
+            return
+        }
+        callError = null
+        if (engine == null) {
+            val incomingEngine = WebRtcAudioCallEngine(context.applicationContext, deviceId, activeCallId, object : WebRtcAudioCallEngine.Listener {
+                override fun onStateChanged(state: WebRtcCallState, error: String?) {
+                    callState = state
+                    callError = error
+                    if (state == WebRtcCallState.FAILED && !calleeAccepted && currentCallId == activeCallId) {
+                        signaling.declineCall(activeCallId, activePeer)
+                        currentCallId = null
+                        peerDeviceId = null
+                        pendingRemoteOffer = null
+                        pendingRemoteIce = emptyList()
+                        screen = DemoScreen.Contacts
+                    }
+                    if (state == WebRtcCallState.CONNECTED) signaling.markConnected(activeCallId)
+                }
+
+                override fun onLocalDescription(type: String, sdp: String) {
+                    if (type == "offer") {
+                        signaling.sendOffer(activeCallId, activePeer, sdp)
+                    } else if (type == "answer") {
+                        signaling.sendAnswer(activeCallId, activePeer, sdp)
+                    }
+                }
+
+                override fun onLocalIceCandidate(candidate: LocalIceCandidate) {
+                    signaling.sendIceCandidate(activeCallId, activePeer, candidate)
+                }
+
+                override fun onIceDiagnosticsChanged(diagnostic: String) {
+                    iceDiagnostics = diagnostic
+                }
+            })
+            engine = incomingEngine
+            incomingEngine.setMuted(isMuted)
+            incomingEngine.setSpeakerEnabled(speakerEnabled)
+            pendingRemoteIce.forEach(incomingEngine::addRemoteIceCandidate)
+            pendingRemoteIce = emptyList()
+        }
+        val activeEngine = engine ?: return
+        activeEngine.prepareForRemoteOffer {
+            if (currentCallId != activeCallId || peerDeviceId != activePeer || engine !== activeEngine) return@prepareForRemoteOffer
+            callError = null
+            calleeAccepted = true
+            signaling.acceptCall(activeCallId, activePeer)
+            pendingRemoteOffer?.let(activeEngine::applyRemoteOffer)
+            screen = DemoScreen.ActiveCall
+            pendingRemoteOffer = null
+        }
+    }
+
+    val answerMicrophonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val activeCallId = currentCallId ?: "none"
+        Log.i(PermissionLogTag, "deviceId=$deviceId callId=$activeCallId microphonePermission=${if (granted) "granted" else "denied"} purpose=callee")
+        if (granted) {
+            completeAnswer()
+        } else {
+            rejectAnswerForPermission()
+        }
+    }
+    val handleAnswer = fun() {
+        val granted = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        Log.i(PermissionLogTag, "deviceId=$deviceId microphonePermission=${if (granted) "granted" else "not-granted"} purpose=callee")
+        if (granted) {
+            callError = null
+            completeAnswer()
+        } else {
+            answerMicrophonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    val handleDecline = fun() {
+        val activeCallId = currentCallId ?: return
+        val activePeer = peerDeviceId ?: return
+        signaling.declineCall(activeCallId, activePeer)
+        engine?.dispose("local decline")
+        engine = null
+        currentCallId = null
+        peerDeviceId = null
+        pendingRemoteOffer = null
+        pendingRemoteIce = emptyList()
+        calleeAccepted = false
+        callState = WebRtcCallState.IDLE
+        screen = DemoScreen.Contacts
+    }
+
+    val endCall = fun() {
+        val activeCallId = currentCallId ?: return
+        val activePeer = peerDeviceId ?: return
+        signaling.endCall(activeCallId, activePeer)
+        val activeEngine = engine
+        engine = null
+        activeEngine?.endCall("local end call")
+        currentCallId = null
+        peerDeviceId = null
+        pendingRemoteOffer = null
+        pendingRemoteIce = emptyList()
+        calleeAccepted = false
+        callState = WebRtcCallState.IDLE
+        isMuted = false
+        speakerEnabled = true
+        screen = DemoScreen.Contacts
+    }
+
+    DisposableEffect(engine) {
+        val activeEngine = engine
+        onDispose { activeEngine?.dispose() }
+    }
+
+    DisposableEffect(signaling) {
+        onDispose { signaling.close() }
+    }
+
+    DisposableEffect(authController) {
+        onDispose { authController.close() }
+    }
+
+    LaunchedEffect(authState.phase) {
+        if (authState.phase == AuthPhase.AUTHENTICATED) {
+            if (screen == DemoScreen.SignIn) screen = DemoScreen.Contacts
+        } else if (authState.phase != AuthPhase.SIGNING_OUT) {
+            screen = DemoScreen.SignIn
+        }
+    }
+
+    BackHandler(enabled = authState.phase == AuthPhase.AUTHENTICATED && screen != DemoScreen.SignIn) {
+        when (screen) {
+            DemoScreen.ActiveCall -> endCall()
+            DemoScreen.IncomingCall -> handleDecline()
+            DemoScreen.Contacts -> screen = DemoScreen.SignIn
+            DemoScreen.SignIn -> Unit
         }
     }
 
@@ -127,33 +526,81 @@ private fun PupsikCallApp() {
                 .background(AppBackground)
                 .windowInsetsPadding(WindowInsets.safeDrawing),
         ) {
-            when (screen) {
-                DemoScreen.SignIn -> SignInScreen { screen = DemoScreen.Contacts }
-                DemoScreen.Contacts -> ContactsScreen(
-                    onContactSelected = { screen = DemoScreen.IncomingCall },
-                    onCall = { screen = DemoScreen.ActiveCall },
+            when {
+                authState.phase == AuthPhase.CHECKING_SESSION -> AuthLoadingScreen()
+                authState.phase != AuthPhase.AUTHENTICATED && authState.phase != AuthPhase.SIGNING_OUT -> SignInScreen(
+                    state = authState,
+                    languageCodes = languageCodes,
+                    languageNames = languageNames,
+                    selectedLanguageIndex = selectedLanguageIndex,
+                    onLanguageSelected = ::applyApplicationLanguage,
+                    onSignIn = { email, password -> authScope.launch { authController.login(email, password) } },
+                    onRegister = { email, password -> authScope.launch { authController.register(email, password) } },
                 )
-                DemoScreen.IncomingCall -> IncomingCallScreen(
-                    onDecline = { screen = DemoScreen.Contacts },
-                    onAnswer = { screen = DemoScreen.ActiveCall },
-                )
-                DemoScreen.ActiveCall -> ActiveCallScreen(
-                    isMuted = isMuted,
-                    speakerEnabled = speakerEnabled,
-                    onBack = { screen = DemoScreen.Contacts },
-                    onToggleMute = { isMuted = !isMuted },
-                    onToggleSpeaker = { speakerEnabled = !speakerEnabled },
-                    onEndCall = { screen = DemoScreen.Contacts },
-                )
+                else -> when (screen) {
+                    DemoScreen.SignIn, DemoScreen.Contacts -> ContactsScreen(
+                        deviceId = deviceId,
+                        peerOnline = peerOnline,
+                        errorMessage = localizedAuthMessage ?: callError.takeIf { BuildConfig.DEBUG },
+                        loggingOut = authState.phase == AuthPhase.SIGNING_OUT,
+                        onCall = requestCall,
+                        onLogout = { authScope.launch { authController.logout() } },
+                    )
+                    DemoScreen.IncomingCall -> IncomingCallScreen(
+                        errorMessage = callError.takeIf { BuildConfig.DEBUG },
+                        onDecline = handleDecline,
+                        onAnswer = handleAnswer,
+                    )
+                    DemoScreen.ActiveCall -> ActiveCallScreen(
+                        isMuted = isMuted,
+                        speakerEnabled = speakerEnabled,
+                        callState = callState,
+                        errorMessage = callError.takeIf { BuildConfig.DEBUG },
+                        iceDiagnostics = iceDiagnostics,
+                        onBack = endCall,
+                        onToggleMute = {
+                            isMuted = !isMuted
+                            engine?.setMuted(isMuted)
+                        },
+                        onToggleSpeaker = {
+                            speakerEnabled = !speakerEnabled
+                            engine?.setSpeakerEnabled(speakerEnabled)
+                        },
+                        onEndCall = endCall,
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun SignInScreen(onSignIn: () -> Unit) {
-    var username by rememberSaveable { mutableStateOf("Pupsik") }
-    var password by rememberSaveable { mutableStateOf("pupsik") }
+private fun AuthLoadingScreen() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            BrandMark()
+            Spacer(Modifier.height(24.dp))
+            CircularProgressIndicator(color = LightPurple)
+            Spacer(Modifier.height(12.dp))
+            Text(stringResource(R.string.checking_session), color = SecondaryText, fontSize = 14.sp)
+        }
+    }
+}
+
+@Composable
+private fun SignInScreen(
+    state: AuthUiState,
+    languageCodes: List<String>,
+    languageNames: List<String>,
+    selectedLanguageIndex: Int,
+    onLanguageSelected: (String) -> Unit,
+    onSignIn: (String, String) -> Unit,
+    onRegister: (String, String) -> Unit,
+) {
+    var registering by rememberSaveable { mutableStateOf(false) }
+    var email by rememberSaveable { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    val busy = state.isBusy
 
     Column(
         modifier = Modifier
@@ -165,27 +612,35 @@ private fun SignInScreen(onSignIn: () -> Unit) {
     ) {
         BrandMark()
         Spacer(Modifier.height(20.dp))
-        Text("PupsikCall", color = MainText, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.app_name), color = MainText, fontSize = 34.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(5.dp))
-        Text("Simple. Private. Free Calls.", color = SecondaryText, fontSize = 15.sp)
-        Spacer(Modifier.height(34.dp))
+        Text(
+            stringResource(if (registering) R.string.register_title else R.string.tagline),
+            color = SecondaryText,
+            fontSize = 15.sp,
+        )
+        Spacer(Modifier.height(10.dp))
+        LanguageSelector(languageCodes, languageNames, selectedLanguageIndex, onLanguageSelected)
+        Spacer(Modifier.height(20.dp))
         OutlinedTextField(
-            value = username,
-            onValueChange = { username = it },
+            value = email,
+            onValueChange = { email = it },
             modifier = Modifier.fillMaxWidth().height(60.dp),
-            placeholder = { Text("Username", fontSize = 15.sp) },
+            enabled = !busy,
+            placeholder = { Text(stringResource(R.string.email), fontSize = 15.sp) },
             leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(21.dp)) },
             singleLine = true,
             shape = RoundedCornerShape(18.dp),
             colors = signInFieldColors(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
         )
         Spacer(Modifier.height(13.dp))
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
             modifier = Modifier.fillMaxWidth().height(60.dp),
-            placeholder = { Text("Password", fontSize = 15.sp) },
+            enabled = !busy,
+            placeholder = { Text(stringResource(R.string.password), fontSize = 15.sp) },
             leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(21.dp)) },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
@@ -194,19 +649,83 @@ private fun SignInScreen(onSignIn: () -> Unit) {
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         )
         Spacer(Modifier.height(18.dp))
+        state.message?.let { message ->
+            Text(
+            stringResource(message.stringResourceId()),
+            color = if (message == AuthMessage.CONFIRMATION_REQUIRED) SecondaryText else DeclineRed,
+                fontSize = 13.sp,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            )
+        }
         Button(
-            onClick = onSignIn,
+            enabled = !busy,
+            onClick = {
+                val submittedPassword = password
+                password = ""
+                if (registering) onRegister(email, submittedPassword) else onSignIn(email, submittedPassword)
+            },
             modifier = Modifier.fillMaxWidth().height(58.dp),
             shape = RoundedCornerShape(18.dp),
             colors = ButtonDefaults.buttonColors(containerColor = PrimaryPurple),
         ) {
-            Text("Sign In", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            if (busy) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = MainText, strokeWidth = 2.dp)
+                Spacer(Modifier.size(10.dp))
+            }
+            Text(
+                when {
+                    state.phase == AuthPhase.REGISTERING -> stringResource(R.string.creating_account)
+                    state.phase == AuthPhase.LOGGING_IN -> stringResource(R.string.signing_in)
+                    registering -> stringResource(R.string.create_account)
+                    else -> stringResource(R.string.sign_in)
+                },
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
         Spacer(Modifier.height(17.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Don't have an account?", color = SecondaryText, fontSize = 13.sp)
-            TextButton(onClick = {}) {
-                Text("Create Account", color = LightPurple, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                stringResource(if (registering) R.string.already_registered else R.string.no_account),
+                color = SecondaryText,
+                fontSize = 13.sp,
+            )
+            TextButton(enabled = !busy, onClick = { registering = !registering; password = "" }) {
+                Text(
+                    stringResource(if (registering) R.string.sign_in else R.string.create_account),
+                    color = LightPurple,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LanguageSelector(
+    languageCodes: List<String>,
+    languageNames: List<String>,
+    selectedLanguageIndex: Int,
+    onLanguageSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.language), color = SecondaryText, fontSize = 13.sp)
+            TextButton(onClick = { expanded = true }) {
+                Text(languageNames[selectedLanguageIndex], color = LightPurple, fontSize = 14.sp)
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            languageNames.forEachIndexed { index, name ->
+                DropdownMenuItem(
+                    text = { Text(name) },
+                    onClick = {
+                        expanded = false
+                        onLanguageSelected(languageCodes[index])
+                    },
+                )
             }
         }
     }
@@ -251,22 +770,36 @@ private fun BrandMark() {
 }
 
 @Composable
-private fun ContactsScreen(onContactSelected: () -> Unit, onCall: () -> Unit) {
+private fun ContactsScreen(
+    deviceId: String,
+    peerOnline: Boolean,
+    errorMessage: String?,
+    loggingOut: Boolean,
+    onCall: () -> Unit,
+    onLogout: () -> Unit,
+) {
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 23.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().height(68.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text("Contacts", color = MainText, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            IconButton(onClick = {}, modifier = Modifier.size(48.dp)) {
-                PersonAddGlyph()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.contacts), color = MainText, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                TextButton(enabled = !loggingOut, onClick = onLogout) {
+                    Text(stringResource(if (loggingOut) R.string.signing_out else R.string.log_out), color = SecondaryText, fontSize = 12.sp)
+                }
+                IconButton(onClick = {}, modifier = Modifier.size(48.dp)) {
+                    PersonAddGlyph()
+                }
             }
         }
+        if (errorMessage != null) {
+            Text(errorMessage, color = DeclineRed, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
+        }
         Spacer(Modifier.height(11.dp))
-        ContactRow("T", "Tanya", "Online", true, onContactSelected, onCall)
-        Spacer(Modifier.height(8.dp))
-        ContactRow("P", "Pupsik2", "Offline", false, onContactSelected, onCall)
+        val peerName = stringResource(if (deviceId == "pupsik-a") R.string.peer_b else R.string.peer_a)
+        ContactRow("P", peerName, stringResource(if (peerOnline) R.string.online else R.string.offline), peerOnline, onCall)
         Spacer(Modifier.weight(1f))
         BottomNavigationBar()
     }
@@ -275,7 +808,7 @@ private fun ContactsScreen(onContactSelected: () -> Unit, onCall: () -> Unit) {
 @Composable
 private fun PersonAddGlyph() {
     Box(Modifier.size(27.dp)) {
-        Icon(Icons.Filled.Person, contentDescription = "Add contact", tint = MainText, modifier = Modifier.align(Alignment.CenterStart).size(24.dp))
+        Icon(Icons.Filled.Person, contentDescription = stringResource(R.string.add_contact), tint = MainText, modifier = Modifier.align(Alignment.CenterStart).size(24.dp))
         Canvas(Modifier.align(Alignment.BottomEnd).size(12.dp)) {
             drawCircle(AppBackground)
             val strokeWidth = 1.7.dp.toPx()
@@ -291,7 +824,6 @@ private fun ContactRow(
     name: String,
     status: String,
     online: Boolean,
-    onSelect: () -> Unit,
     onCall: () -> Unit,
 ) {
     Row(
@@ -299,7 +831,6 @@ private fun ContactRow(
             .fillMaxWidth()
             .height(82.dp)
             .clip(RoundedCornerShape(20.dp))
-            .clickable(onClick = onSelect)
             .padding(horizontal = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -317,7 +848,7 @@ private fun ContactRow(
             onClick = onCall,
             modifier = Modifier.size(48.dp).clip(CircleShape).background(OnlineGreen),
         ) {
-            Icon(Icons.Filled.Call, contentDescription = "Call $name", tint = Color.White, modifier = Modifier.size(22.dp))
+            Icon(Icons.Filled.Call, contentDescription = stringResource(R.string.call_contact, name), tint = Color.White, modifier = Modifier.size(22.dp))
         }
     }
 }
@@ -352,8 +883,8 @@ private fun BottomNavigationBar() {
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BottomNavigationItem("Contacts", true, Icons.Filled.Person)
-            BottomNavigationItem("Settings", false, Icons.Filled.Settings)
+            BottomNavigationItem(stringResource(R.string.contacts), true, Icons.Filled.Person)
+            BottomNavigationItem(stringResource(R.string.settings), false, Icons.Filled.Settings)
         }
     }
 }
@@ -377,7 +908,7 @@ private fun BottomNavigationItem(
 }
 
 @Composable
-private fun IncomingCallScreen(onDecline: () -> Unit, onAnswer: () -> Unit) {
+private fun IncomingCallScreen(errorMessage: String?, onDecline: () -> Unit, onAnswer: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -394,16 +925,20 @@ private fun IncomingCallScreen(onDecline: () -> Unit, onAnswer: () -> Unit) {
         ) {
             ProfileAvatar("T", 148.dp, true)
             Spacer(Modifier.height(22.dp))
-            Text("Tanya", color = MainText, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.demo_contact_name), color = MainText, fontSize = 32.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
-            Text("Incoming call...", color = SecondaryText, fontSize = 16.sp)
+            Text(stringResource(R.string.incoming_call_status), color = SecondaryText, fontSize = 16.sp)
+            if (errorMessage != null) {
+                Spacer(Modifier.height(10.dp))
+                Text(errorMessage, color = DeclineRed, fontSize = 13.sp)
+            }
         }
         Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            CallActionButton("Decline", DeclineRed, onDecline, rotatePhone = true)
-            CallActionButton("Answer", OnlineGreen, onAnswer)
+            CallActionButton(stringResource(R.string.decline), DeclineRed, onDecline, rotatePhone = true)
+            CallActionButton(stringResource(R.string.answer), OnlineGreen, onAnswer)
         }
     }
 }
@@ -433,9 +968,27 @@ private fun CallActionButton(
 }
 
 @Composable
+private fun callStateText(state: WebRtcCallState): String = when (state) {
+    WebRtcCallState.IDLE -> ""
+    WebRtcCallState.INITIALIZING -> stringResource(R.string.call_state_preparing_audio)
+    WebRtcCallState.CREATING_OFFER -> stringResource(R.string.call_state_creating_offer)
+    WebRtcCallState.WAITING_FOR_REMOTE -> stringResource(R.string.call_state_waiting_for_peer)
+    WebRtcCallState.WAITING_FOR_OFFER -> stringResource(R.string.call_state_waiting_for_offer)
+    WebRtcCallState.CREATING_ANSWER -> stringResource(R.string.call_state_creating_answer)
+    WebRtcCallState.CONNECTING -> stringResource(R.string.call_state_connecting)
+    WebRtcCallState.CONNECTED -> stringResource(R.string.call_state_connected)
+    WebRtcCallState.DISCONNECTED -> stringResource(R.string.call_state_disconnected)
+    WebRtcCallState.FAILED -> stringResource(R.string.call_state_failed)
+    WebRtcCallState.ENDED -> stringResource(R.string.call_state_ended)
+}
+
+@Composable
 private fun ActiveCallScreen(
     isMuted: Boolean,
     speakerEnabled: Boolean,
+    callState: WebRtcCallState,
+    errorMessage: String?,
+    iceDiagnostics: String,
     onBack: () -> Unit,
     onToggleMute: () -> Unit,
     onToggleSpeaker: () -> Unit,
@@ -443,7 +996,7 @@ private fun ActiveCallScreen(
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 8.dp)) {
         IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
-            Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = MainText, modifier = Modifier.size(24.dp))
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back), tint = MainText, modifier = Modifier.size(24.dp))
         }
         Column(
             modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -452,19 +1005,34 @@ private fun ActiveCallScreen(
         ) {
             ProfileAvatar("T", 142.dp, true)
             Spacer(Modifier.height(19.dp))
-            Text("Tanya", color = MainText, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.demo_contact_name), color = MainText, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(7.dp))
-            Text("00:12", color = SecondaryText, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            Text(
+                if (callState == WebRtcCallState.FAILED) {
+                    RuntimeDiagnostic.failureDisplayText(BuildConfig.DEBUG, stringResource(R.string.call_state_failed), errorMessage)
+                } else callStateText(callState),
+                color = if (callState == WebRtcCallState.CONNECTED) OnlineGreen else SecondaryText,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            if (errorMessage != null && !(BuildConfig.DEBUG && callState == WebRtcCallState.FAILED)) {
+                Spacer(Modifier.height(8.dp))
+                Text(errorMessage, color = DeclineRed, fontSize = 13.sp)
+            }
+            if (BuildConfig.DEBUG && iceDiagnostics.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(iceDiagnostics, color = SecondaryText, fontSize = 11.sp, lineHeight = 14.sp)
+            }
             Spacer(Modifier.height(39.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CallControl("Mute", isMuted, onToggleMute) { MicrophoneGlyph(isMuted) }
-                CallControl("Speaker", speakerEnabled, onToggleSpeaker) { SpeakerGlyph() }
-                CallControl("More", false, {}) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = null, tint = Color.White, modifier = Modifier.size(23.dp))
+                CallControl(stringResource(R.string.mute), isMuted, onToggleMute) { MicrophoneGlyph(isMuted) }
+                CallControl(stringResource(R.string.speaker), speakerEnabled, onToggleSpeaker) { SpeakerGlyph() }
+                CallControl(stringResource(R.string.more), false, {}) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.more), tint = Color.White, modifier = Modifier.size(23.dp))
                 }
             }
         }
@@ -476,10 +1044,10 @@ private fun ActiveCallScreen(
                 onClick = onEndCall,
                 modifier = Modifier.size(76.dp).clip(CircleShape).background(DeclineRed),
             ) {
-                Icon(Icons.Filled.Call, contentDescription = "End call", tint = Color.White, modifier = Modifier.size(31.dp).rotate(135f))
+                Icon(Icons.Filled.Call, contentDescription = stringResource(R.string.end_call_description), tint = Color.White, modifier = Modifier.size(31.dp).rotate(135f))
             }
             Spacer(Modifier.height(8.dp))
-            Text("End Call", color = MainText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.end_call), color = MainText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         }
     }
 }
