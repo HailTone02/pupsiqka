@@ -42,7 +42,6 @@
     <string name="incoming_call_status">Po të telefonojnë…</string>
     <string name="answer">Përgjigju</string>
     <string name="decline">Refuzo</string>
-    <string name="demo_contact_name">Tanja</string>
     <string name="back">Prapa</string>
     <string name="call_state_preparing_audio">Po përgatitet audioja</string>
     <string name="call_state_creating_offer">Po krijohet oferta</string>
@@ -60,4 +59,27 @@
     <string name="end_call">Përfundo telefonatën</string>
     <string name="end_call_description">Përfundo telefonatën</string>
     <string name="microphone_permission_error">Leja për mikrofonin mungon. Lejo qasjen te mikrofoni për të telefonuar ose për t’u përgjigjur.</string>
+    <string name="calls">Thirrjet</string>
+    <string name="messages">Mesazhet</string>
+    <string name="profile">Profili</string>
+    <string name="recent">Të fundit</string>
+    <string name="no_recent_calls">Nuk ka thirrje të fundit</string>
+    <string name="no_messages">Ende pa mesazhe</string>
+    <string name="start_conversation">Nis një bisedë</string>
+    <string name="message_hint">Mesazh</string>
+    <string name="send_message">Dërgo mesazh</string>
+    <string name="appearance">Pamja</string>
+    <string name="appearance_system">Sistemi</string>
+    <string name="appearance_light">E çelët</string>
+    <string name="appearance_dark">E errët</string>
+    <string name="account">Llogaria</string>
+    <string name="device">Pajisja</string>
+    <string name="sign_out">Dil</string>
+    <string name="call_now">Telefono tani</string>
+    <string name="swipe_to_answer">Rrëshqit për t’u përgjigjur</string>
+    <string name="swipe_to_decline">Rrëshqit për ta refuzuar</string>
+    <string name="call_connected">Thirrja u lidh</string>
+    <string name="connecting_call">Po lidhet thirrja</string>
+    <string name="call_controls">Kontrollet e thirrjes</string>
+    <string name="conversation">Biseda</string>
 </resources>

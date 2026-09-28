@@ -3,6 +3,7 @@ package com.pupsikcall.app
 import android.os.Bundle
 import android.util.Log
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
@@ -61,6 +62,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -91,16 +93,16 @@ import androidx.core.view.WindowInsetsControllerCompat
 import java.util.UUID
 import kotlinx.coroutines.launch
 
-private val AppBackground = Color(0xFF111015)
-private val AppSurface = Color(0xFF1D1B23)
-private val FieldBackground = Color(0xFF211F27)
-private val FieldBorder = Color(0xFF302D37)
-private val PrimaryPurple = Color(0xFF8B5CF6)
-private val LightPurple = Color(0xFFB89AFF)
-private val OnlineGreen = Color(0xFF32D583)
-private val DeclineRed = Color(0xFFFF5364)
-private val MainText = Color(0xFFF8F7FA)
-private val SecondaryText = Color(0xFFA29EAA)
+private val AppBackground: Color @Composable get() = LocalPupsikPalette.current.background
+private val AppSurface: Color @Composable get() = LocalPupsikPalette.current.surface
+private val FieldBackground: Color @Composable get() = LocalPupsikPalette.current.field
+private val FieldBorder: Color @Composable get() = LocalPupsikPalette.current.outline
+private val PrimaryPurple: Color @Composable get() = LocalPupsikPalette.current.bronze
+private val LightPurple: Color @Composable get() = LocalPupsikPalette.current.caramel
+private val OnlineGreen: Color @Composable get() = LocalPupsikPalette.current.online
+private val DeclineRed: Color @Composable get() = LocalPupsikPalette.current.danger
+private val MainText: Color @Composable get() = LocalPupsikPalette.current.text
+private val SecondaryText: Color @Composable get() = LocalPupsikPalette.current.muted
 private const val PermissionLogTag = "PupsikCallPermission"
 
 private fun AuthMessage.stringResourceId(): Int = when (this) {
@@ -122,14 +124,14 @@ private fun AuthMessage.stringResourceId(): Int = when (this) {
     AuthMessage.LOGOUT_FAILED -> R.string.auth_logout_failed
 }
 
-private enum class DemoScreen { SignIn, Contacts, IncomingCall, ActiveCall }
+private enum class DemoScreen { SignIn, Contacts, Calls, Messages, Conversation, Settings, Profile, IncomingCall, ActiveCall }
 
 class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        window.statusBarColor = AppBackground.toArgb()
-        window.navigationBarColor = AppBackground.toArgb()
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
         WindowInsetsControllerCompat(window, window.decorView).apply {
             isAppearanceLightStatusBars = false
             isAppearanceLightNavigationBars = false
@@ -155,12 +157,21 @@ private fun PupsikCallApp() {
     var calleeAccepted by remember { mutableStateOf(false) }
     var signalingInstance: SupabaseCallSignaling? by remember { mutableStateOf(null) }
     val context = LocalContext.current
+    var appearanceMode by rememberSaveable {
+        mutableStateOf(AppearanceMode.fromPreference(context.getSharedPreferences("pupsikcall.preferences", 0).getString("appearance", "system")))
+    }
     val deviceId = BuildConfig.PUPSIKCALL_DEVICE_ID.ifBlank { "pupsik-a" }
     val languageCodes = stringArrayResource(R.array.supported_language_codes).toList()
     val languageNames = stringArrayResource(R.array.supported_language_names).toList()
     val applicationLocaleTags = AppCompatDelegate.getApplicationLocales().toLanguageTags()
     val systemLocaleTag = LocalConfiguration.current.locales.get(0)?.toLanguageTag().orEmpty()
     val selectedLanguageIndex = selectedLanguageIndex(languageCodes, applicationLocaleTags, systemLocaleTag)
+    val peerNameResource = when (peerDeviceId) {
+        "pupsik-a" -> R.string.peer_a
+        "pupsik-b" -> R.string.peer_b
+        else -> if (deviceId == "pupsik-a") R.string.peer_b else R.string.peer_a
+    }
+    val peerName = stringResource(peerNameResource)
     val signaling = remember {
         var signalingRef: SupabaseCallSignaling? = null
         val newSignaling = SupabaseCallSignaling(
@@ -505,21 +516,32 @@ private fun PupsikCallApp() {
         when (screen) {
             DemoScreen.ActiveCall -> endCall()
             DemoScreen.IncomingCall -> handleDecline()
+            DemoScreen.Conversation -> screen = DemoScreen.Messages
+            DemoScreen.Settings, DemoScreen.Profile, DemoScreen.Calls, DemoScreen.Messages -> screen = DemoScreen.Contacts
             DemoScreen.Contacts -> screen = DemoScreen.SignIn
             DemoScreen.SignIn -> Unit
         }
     }
 
-    MaterialTheme(
-        colorScheme = darkColorScheme(
-            primary = PrimaryPurple,
-            secondary = OnlineGreen,
-            background = AppBackground,
-            surface = AppSurface,
-            onBackground = MainText,
-            onSurface = MainText,
-        ),
-    ) {
+    PupsikTheme(appearanceMode) {
+        val palette = LocalPupsikPalette.current
+        val darkAppearance = when (appearanceMode) {
+            AppearanceMode.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme()
+            AppearanceMode.LIGHT -> false
+            AppearanceMode.DARK -> true
+        }
+        SideEffect {
+            val window = (context as? Activity)?.window
+            if (window != null) {
+                window.statusBarColor = palette.background.toArgb()
+                window.navigationBarColor = palette.background.toArgb()
+                WindowInsetsControllerCompat(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = !darkAppearance
+                    isAppearanceLightNavigationBars = !darkAppearance
+                }
+            }
+            context.getSharedPreferences("pupsikcall.preferences", 0).edit().putString("appearance", appearanceMode.preferenceValue).apply()
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -538,20 +560,62 @@ private fun PupsikCallApp() {
                     onRegister = { email, password -> authScope.launch { authController.register(email, password) } },
                 )
                 else -> when (screen) {
-                    DemoScreen.SignIn, DemoScreen.Contacts -> ContactsScreen(
-                        deviceId = deviceId,
-                        peerOnline = peerOnline,
+                    DemoScreen.SignIn, DemoScreen.Contacts -> PupsikContactsScreen(
+                        peerName = peerName,
+                        online = peerOnline,
                         errorMessage = localizedAuthMessage ?: callError.takeIf { BuildConfig.DEBUG },
-                        loggingOut = authState.phase == AuthPhase.SIGNING_OUT,
                         onCall = requestCall,
+                        onOpenCalls = { screen = DemoScreen.Calls },
+                        onOpenMessages = { screen = DemoScreen.Messages },
+                        onOpenSettings = { screen = DemoScreen.Settings },
+                        onOpenProfile = { screen = DemoScreen.Profile },
+                    )
+                    DemoScreen.Calls -> PupsikCallsScreen(
+                        peerName = peerName,
+                        online = peerOnline,
+                        onCall = requestCall,
+                        onOpenContacts = { screen = DemoScreen.Contacts },
+                        onOpenMessages = { screen = DemoScreen.Messages },
+                    )
+                    DemoScreen.Messages -> PupsikMessagesScreen(
+                        peerName = peerName,
+                        online = peerOnline,
+                        onOpenConversation = { screen = DemoScreen.Conversation },
+                        onOpenContacts = { screen = DemoScreen.Contacts },
+                        onOpenCalls = { screen = DemoScreen.Calls },
+                    )
+                    DemoScreen.Conversation -> PupsikConversationScreen(
+                        peerName = peerName,
+                        online = peerOnline,
+                        onBack = { screen = DemoScreen.Messages },
+                        onCall = requestCall,
+                    )
+                    DemoScreen.Settings -> PupsikSettingsScreen(
+                        appearance = appearanceMode,
+                        onAppearanceChange = { appearanceMode = it },
+                        languageCodes = languageCodes,
+                        languageNames = languageNames,
+                        selectedLanguageIndex = selectedLanguageIndex,
+                        onLanguageSelected = ::applyApplicationLanguage,
+                        onOpenProfile = { screen = DemoScreen.Profile },
                         onLogout = { authScope.launch { authController.logout() } },
                     )
-                    DemoScreen.IncomingCall -> IncomingCallScreen(
+                    DemoScreen.Profile -> PupsikProfileScreen(
+                        email = authState.email,
+                        deviceId = deviceId,
+                        peerName = peerName,
+                        peerOnline = peerOnline,
+                        onBack = { screen = DemoScreen.Settings },
+                        onLogout = { authScope.launch { authController.logout() } },
+                    )
+                    DemoScreen.IncomingCall -> PupsikIncomingCallScreen(
+                        peerName = peerName,
                         errorMessage = callError.takeIf { BuildConfig.DEBUG },
                         onDecline = handleDecline,
                         onAnswer = handleAnswer,
                     )
-                    DemoScreen.ActiveCall -> ActiveCallScreen(
+                    DemoScreen.ActiveCall -> PupsikActiveCallScreen(
+                        peerName = peerName,
                         isMuted = isMuted,
                         speakerEnabled = speakerEnabled,
                         callState = callState,
@@ -612,7 +676,7 @@ private fun SignInScreen(
     ) {
         BrandMark()
         Spacer(Modifier.height(20.dp))
-        Text(stringResource(R.string.app_name), color = MainText, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.app_name), color = MainText, style = MaterialTheme.typography.displayMedium)
         Spacer(Modifier.height(5.dp))
         Text(
             stringResource(if (registering) R.string.register_title else R.string.tagline),
@@ -630,7 +694,7 @@ private fun SignInScreen(
             placeholder = { Text(stringResource(R.string.email), fontSize = 15.sp) },
             leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(21.dp)) },
             singleLine = true,
-            shape = RoundedCornerShape(18.dp),
+            shape = PupsikShapes.panel,
             colors = signInFieldColors(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
         )
@@ -644,7 +708,7 @@ private fun SignInScreen(
             leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(21.dp)) },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
-            shape = RoundedCornerShape(18.dp),
+            shape = PupsikShapes.panel,
             colors = signInFieldColors(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         )
@@ -665,7 +729,7 @@ private fun SignInScreen(
                 if (registering) onRegister(email, submittedPassword) else onSignIn(email, submittedPassword)
             },
             modifier = Modifier.fillMaxWidth().height(58.dp),
-            shape = RoundedCornerShape(18.dp),
+            shape = PupsikShapes.panel,
             colors = ButtonDefaults.buttonColors(containerColor = PrimaryPurple),
         ) {
             if (busy) {
@@ -807,13 +871,15 @@ private fun ContactsScreen(
 
 @Composable
 private fun PersonAddGlyph() {
+    val backgroundColor = AppBackground
+    val glyphColor = MainText
     Box(Modifier.size(27.dp)) {
         Icon(Icons.Filled.Person, contentDescription = stringResource(R.string.add_contact), tint = MainText, modifier = Modifier.align(Alignment.CenterStart).size(24.dp))
         Canvas(Modifier.align(Alignment.BottomEnd).size(12.dp)) {
-            drawCircle(AppBackground)
+            drawCircle(backgroundColor)
             val strokeWidth = 1.7.dp.toPx()
-            drawLine(MainText, Offset(size.width * 0.5f, size.height * 0.18f), Offset(size.width * 0.5f, size.height * 0.82f), strokeWidth, cap = StrokeCap.Round)
-            drawLine(MainText, Offset(size.width * 0.18f, size.height * 0.5f), Offset(size.width * 0.82f, size.height * 0.5f), strokeWidth, cap = StrokeCap.Round)
+            drawLine(glyphColor, Offset(size.width * 0.5f, size.height * 0.18f), Offset(size.width * 0.5f, size.height * 0.82f), strokeWidth, cap = StrokeCap.Round)
+            drawLine(glyphColor, Offset(size.width * 0.18f, size.height * 0.5f), Offset(size.width * 0.82f, size.height * 0.5f), strokeWidth, cap = StrokeCap.Round)
         }
     }
 }
@@ -826,11 +892,12 @@ private fun ContactRow(
     online: Boolean,
     onCall: () -> Unit,
 ) {
+    val palette = LocalPupsikPalette.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(82.dp)
-            .clip(RoundedCornerShape(20.dp))
+            .clip(PupsikShapes.panel)
             .padding(horizontal = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -839,7 +906,7 @@ private fun ContactRow(
             Text(name, color = MainText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(7.dp).clip(CircleShape).background(if (online) OnlineGreen else Color(0xFF77737D)))
+                Box(Modifier.size(7.dp).clip(CircleShape).background(if (online) OnlineGreen else palette.subtle))
                 Spacer(Modifier.size(6.dp))
                 Text(status, color = if (online) OnlineGreen else SecondaryText, fontSize = 12.sp)
             }
@@ -854,14 +921,15 @@ private fun ContactRow(
 }
 
 @Composable
-private fun ProfileAvatar(initial: String, size: Dp, isTanya: Boolean) {
+private fun ProfileAvatar(initial: String, size: Dp, isOnline: Boolean) {
+    val palette = LocalPupsikPalette.current
     Box(
         modifier = Modifier
             .size(size)
             .clip(CircleShape)
             .background(
-                if (isTanya) Brush.linearGradient(listOf(Color(0xFF755A88), Color(0xFF3B344A)))
-                else Brush.linearGradient(listOf(Color(0xFF77757E), Color(0xFF54525B))),
+                if (isOnline) Brush.linearGradient(listOf(palette.caramel, palette.bronze))
+                else Brush.linearGradient(listOf(palette.subtle, palette.surface)),
             ),
         contentAlignment = Alignment.Center,
     ) {
@@ -908,11 +976,12 @@ private fun BottomNavigationItem(
 }
 
 @Composable
-private fun IncomingCallScreen(errorMessage: String?, onDecline: () -> Unit, onAnswer: () -> Unit) {
+private fun IncomingCallScreen(peerName: String, errorMessage: String?, onDecline: () -> Unit, onAnswer: () -> Unit) {
+    val palette = LocalPupsikPalette.current
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(Color(0xFF1D1922), AppBackground, AppBackground)))
+            .background(Brush.verticalGradient(listOf(palette.surface, AppBackground, AppBackground)))
             .padding(horizontal = 28.dp, vertical = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween,
@@ -923,9 +992,9 @@ private fun IncomingCallScreen(errorMessage: String?, onDecline: () -> Unit, onA
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            ProfileAvatar("T", 148.dp, true)
+            ProfileAvatar(peerName.take(1), 148.dp, true)
             Spacer(Modifier.height(22.dp))
-            Text(stringResource(R.string.demo_contact_name), color = MainText, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+            Text(peerName, color = MainText, fontSize = 32.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             Text(stringResource(R.string.incoming_call_status), color = SecondaryText, fontSize = 16.sp)
             if (errorMessage != null) {
@@ -968,7 +1037,7 @@ private fun CallActionButton(
 }
 
 @Composable
-private fun callStateText(state: WebRtcCallState): String = when (state) {
+internal fun callStateText(state: WebRtcCallState): String = when (state) {
     WebRtcCallState.IDLE -> ""
     WebRtcCallState.INITIALIZING -> stringResource(R.string.call_state_preparing_audio)
     WebRtcCallState.CREATING_OFFER -> stringResource(R.string.call_state_creating_offer)
@@ -984,6 +1053,7 @@ private fun callStateText(state: WebRtcCallState): String = when (state) {
 
 @Composable
 private fun ActiveCallScreen(
+    peerName: String,
     isMuted: Boolean,
     speakerEnabled: Boolean,
     callState: WebRtcCallState,
@@ -994,6 +1064,7 @@ private fun ActiveCallScreen(
     onToggleSpeaker: () -> Unit,
     onEndCall: () -> Unit,
 ) {
+    val palette = LocalPupsikPalette.current
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 8.dp)) {
         IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back), tint = MainText, modifier = Modifier.size(24.dp))
@@ -1003,9 +1074,9 @@ private fun ActiveCallScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            ProfileAvatar("T", 142.dp, true)
+            ProfileAvatar(peerName.take(1), 142.dp, true)
             Spacer(Modifier.height(19.dp))
-            Text(stringResource(R.string.demo_contact_name), color = MainText, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Text(peerName, color = MainText, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(7.dp))
             Text(
                 if (callState == WebRtcCallState.FAILED) {
@@ -1059,7 +1130,7 @@ private fun CallControl(
     onClick: () -> Unit,
     icon: @Composable () -> Unit,
 ) {
-    val controlColor = if (selected) PrimaryPurple else Color(0xFF302D36)
+    val controlColor = if (selected) PrimaryPurple else LocalPupsikPalette.current.surfaceRaised
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         IconButton(
             onClick = onClick,

@@ -42,7 +42,6 @@
     <string name="incoming_call_status">Вам звонят…</string>
     <string name="answer">Ответить</string>
     <string name="decline">Отклонить</string>
-    <string name="demo_contact_name">Таня</string>
     <string name="back">Назад</string>
     <string name="call_state_preparing_audio">Подготовка звука</string>
     <string name="call_state_creating_offer">Создание предложения</string>
@@ -60,4 +59,27 @@
     <string name="end_call">Завершить звонок</string>
     <string name="end_call_description">Завершить звонок</string>
     <string name="microphone_permission_error">Нет доступа к микрофону. Разрешите доступ, чтобы звонить и отвечать на звонки.</string>
+    <string name="calls">Звонки</string>
+    <string name="messages">Сообщения</string>
+    <string name="profile">Профиль</string>
+    <string name="recent">Недавние</string>
+    <string name="no_recent_calls">Нет недавних звонков</string>
+    <string name="no_messages">Пока нет сообщений</string>
+    <string name="start_conversation">Начать беседу</string>
+    <string name="message_hint">Сообщение</string>
+    <string name="send_message">Отправить сообщение</string>
+    <string name="appearance">Внешний вид</string>
+    <string name="appearance_system">Система</string>
+    <string name="appearance_light">Светлая</string>
+    <string name="appearance_dark">Тёмная</string>
+    <string name="account">Аккаунт</string>
+    <string name="device">Устройство</string>
+    <string name="sign_out">Выйти</string>
+    <string name="call_now">Позвонить</string>
+    <string name="swipe_to_answer">Проведите, чтобы ответить</string>
+    <string name="swipe_to_decline">Проведите, чтобы отклонить</string>
+    <string name="call_connected">Звонок соединён</string>
+    <string name="connecting_call">Соединение звонка</string>
+    <string name="call_controls">Управление звонком</string>
+    <string name="conversation">Беседа</string>
 </resources>

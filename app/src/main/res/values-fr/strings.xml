@@ -42,7 +42,6 @@
     <string name="incoming_call_status">Quelqu’un vous appelle…</string>
     <string name="answer">Répondre</string>
     <string name="decline">Refuser</string>
-    <string name="demo_contact_name">Tanya</string>
     <string name="back">Retour</string>
     <string name="call_state_preparing_audio">Préparation du son</string>
     <string name="call_state_creating_offer">Création de l’offre</string>
@@ -60,4 +59,27 @@
     <string name="end_call">Terminer l’appel</string>
     <string name="end_call_description">Terminer l’appel</string>
     <string name="microphone_permission_error">Accès au micro refusé. Autorisez le micro pour passer ou recevoir des appels.</string>
+    <string name="calls">Appels</string>
+    <string name="messages">Messagerie</string>
+    <string name="profile">Profil</string>
+    <string name="recent">Récents</string>
+    <string name="no_recent_calls">Aucun appel récent</string>
+    <string name="no_messages">Aucun message pour le moment</string>
+    <string name="start_conversation">Commencer une conversation</string>
+    <string name="message_hint">Votre message</string>
+    <string name="send_message">Envoyer le message</string>
+    <string name="appearance">Apparence</string>
+    <string name="appearance_system">Système</string>
+    <string name="appearance_light">Clair</string>
+    <string name="appearance_dark">Sombre</string>
+    <string name="account">Compte</string>
+    <string name="device">Appareil</string>
+    <string name="sign_out">Se déconnecter</string>
+    <string name="call_now">Appeler</string>
+    <string name="swipe_to_answer">Glisser pour répondre</string>
+    <string name="swipe_to_decline">Glisser pour refuser</string>
+    <string name="call_connected">Appel connecté</string>
+    <string name="connecting_call">Connexion de l’appel</string>
+    <string name="call_controls">Commandes d’appel</string>
+    <string name="conversation">Échange</string>
 </resources>

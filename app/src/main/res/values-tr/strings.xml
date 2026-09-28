@@ -42,7 +42,6 @@
     <string name="incoming_call_status">Aranıyorsun…</string>
     <string name="answer">Yanıtla</string>
     <string name="decline">Reddet</string>
-    <string name="demo_contact_name">Tanya</string>
     <string name="back">Geri</string>
     <string name="call_state_preparing_audio">Ses hazırlanıyor</string>
     <string name="call_state_creating_offer">Teklif oluşturuluyor</string>
@@ -60,4 +59,27 @@
     <string name="end_call">Aramayı bitir</string>
     <string name="end_call_description">Aramayı bitir</string>
     <string name="microphone_permission_error">Mikrofon izni verilmedi. Arama yapmak veya yanıtlamak için mikrofon erişimine izin ver.</string>
+    <string name="calls">Aramalar</string>
+    <string name="messages">Mesajlar</string>
+    <string name="profile">Profil</string>
+    <string name="recent">Son aramalar</string>
+    <string name="no_recent_calls">Yakın zamanda arama yok</string>
+    <string name="no_messages">Henüz mesaj yok</string>
+    <string name="start_conversation">Sohbet başlat</string>
+    <string name="message_hint">Mesaj</string>
+    <string name="send_message">Mesaj gönder</string>
+    <string name="appearance">Görünüm</string>
+    <string name="appearance_system">Sistem</string>
+    <string name="appearance_light">Açık</string>
+    <string name="appearance_dark">Koyu</string>
+    <string name="account">Hesap</string>
+    <string name="device">Cihaz</string>
+    <string name="sign_out">Oturumu kapat</string>
+    <string name="call_now">Şimdi ara</string>
+    <string name="swipe_to_answer">Yanıtlamak için kaydır</string>
+    <string name="swipe_to_decline">Reddetmek için kaydır</string>
+    <string name="call_connected">Arama bağlandı</string>
+    <string name="connecting_call">Arama bağlanıyor</string>
+    <string name="call_controls">Arama denetimleri</string>
+    <string name="conversation">Sohbet</string>
 </resources>

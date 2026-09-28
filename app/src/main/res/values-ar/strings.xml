@@ -42,7 +42,6 @@
     <string name="incoming_call_status">يتصل بك…</string>
     <string name="answer">رد</string>
     <string name="decline">رفض</string>
-    <string name="demo_contact_name">تانيا</string>
     <string name="back">رجوع</string>
     <string name="call_state_preparing_audio">جارٍ إعداد الصوت</string>
     <string name="call_state_creating_offer">جارٍ إنشاء العرض</string>
@@ -60,4 +59,27 @@
     <string name="end_call">إنهاء المكالمة</string>
     <string name="end_call_description">إنهاء المكالمة</string>
     <string name="microphone_permission_error">إذن الميكروفون مرفوض. اسمح بالوصول إلى الميكروفون لإجراء المكالمات أو الرد عليها.</string>
+    <string name="calls">المكالمات</string>
+    <string name="messages">الرسائل</string>
+    <string name="profile">الملف الشخصي</string>
+    <string name="recent">الأخيرة</string>
+    <string name="no_recent_calls">لا توجد مكالمات حديثة</string>
+    <string name="no_messages">لا توجد رسائل بعد</string>
+    <string name="start_conversation">ابدأ محادثة</string>
+    <string name="message_hint">رسالة</string>
+    <string name="send_message">إرسال رسالة</string>
+    <string name="appearance">المظهر</string>
+    <string name="appearance_system">النظام</string>
+    <string name="appearance_light">فاتح</string>
+    <string name="appearance_dark">داكن</string>
+    <string name="account">الحساب</string>
+    <string name="device">الجهاز</string>
+    <string name="sign_out">تسجيل الخروج</string>
+    <string name="call_now">اتصل الآن</string>
+    <string name="swipe_to_answer">اسحب للرد</string>
+    <string name="swipe_to_decline">اسحب للرفض</string>
+    <string name="call_connected">تم الاتصال</string>
+    <string name="connecting_call">جارٍ توصيل المكالمة</string>
+    <string name="call_controls">عناصر التحكم بالمكالمة</string>
+    <string name="conversation">محادثة</string>
 </resources>
