@@ -63,6 +63,7 @@ dependencies {
     implementation(composeBom)
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-compose:1.12.0")
+    implementation("androidx.datastore:datastore-preferences:1.1.7")
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.material3:material3")
     implementation("io.github.webrtc-sdk:android:150.7871.01")

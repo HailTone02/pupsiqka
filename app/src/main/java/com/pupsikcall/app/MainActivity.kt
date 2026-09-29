@@ -90,6 +90,9 @@ import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
@@ -160,9 +163,16 @@ private fun PupsikCallApp() {
     var calleeAccepted by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val authScope = rememberCoroutineScope()
-    var appearanceMode by rememberSaveable {
-        mutableStateOf(AppearanceMode.fromPreference(context.getSharedPreferences("pupsikcall.preferences", 0).getString("appearance", "system")))
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var appInForeground by remember {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
     }
+    val callSoundOutput = remember(context.applicationContext) { AndroidCallSoundOutput(context.applicationContext) }
+    val outgoingRingback = remember(callSoundOutput) { OutgoingRingbackController(callSoundOutput) }
+    val incomingRingtone = remember(callSoundOutput) { IncomingRingtoneController(callSoundOutput) }
+    val autoAnswerController = remember { ForegroundAutoAnswerController(HandlerAutoAnswerScheduler()) }
+    var answerAttemptedCallId by remember { mutableStateOf<UUID?>(null) }
+    var pendingPermissionCallId by remember { mutableStateOf<UUID?>(null) }
     val deviceId = "authenticated-call"
     val languageCodes = stringArrayResource(R.array.supported_language_codes).toList()
     val languageNames = stringArrayResource(R.array.supported_language_names).toList()
@@ -230,11 +240,34 @@ private fun PupsikCallApp() {
                         }
                     }
                     if (currentCallId != session.callId.toString()) return
+                    if (session.status != AuthenticatedCallStatus.RINGING ||
+                        activeCallSession?.callerUserId?.let { it != session.callerUserId } == true
+                    ) {
+                        autoAnswerController.onManualAction(session.callId, ManualCallAction.NONE)
+                    }
                     activeCallSession = session
+                    val soundSignedIn = signalingRef?.authenticatedUserId() == localUserId
+                    val activeCallUuid = session.callId.takeIf { currentCallId == it.toString() }
+                    outgoingRingback.update(
+                        session,
+                        localUserId,
+                        activeCallUuid,
+                        signedIn = soundSignedIn,
+                        foreground = appInForeground && screen == DemoScreen.ActiveCall,
+                    )
+                    incomingRingtone.update(
+                        session,
+                        localUserId,
+                        activeCallUuid,
+                        signedIn = soundSignedIn,
+                        foreground = appInForeground && screen == DemoScreen.IncomingCall &&
+                            answerAttemptedCallId != session.callId,
+                    )
                     if (session.status == AuthenticatedCallStatus.ACCEPTED && session.callerUserId == localUserId) {
                         engine?.startOffer()
                     }
                     if (session.status.isTerminal) {
+                        if (pendingPermissionCallId == session.callId) pendingPermissionCallId = null
                         currentCallId = null
                         activeCallSession = null
                         pendingRemoteOffer = null
@@ -249,6 +282,10 @@ private fun PupsikCallApp() {
                 }
 
                 override fun onAuthenticatedCallSessionLost() {
+                    outgoingRingback.stop()
+                    incomingRingtone.stop()
+                    autoAnswerController.cancel()
+                    pendingPermissionCallId = null
                     currentCallId = null
                     activeCallSession = null
                     pendingRemoteOffer = null
@@ -301,6 +338,10 @@ private fun PupsikCallApp() {
     signalingRef = signaling
     val authController = remember(signaling) { SupabaseAuthController(signaling.authClient) }
     val authState by authController.state.collectAsState()
+    val appSettingsRepository = remember(context.applicationContext) { AppSettingsRepository(context.applicationContext) }
+    val appSettingsState by appSettingsRepository.state.collectAsState()
+    val appSettings = (appSettingsState as? AppSettingsState.Ready)?.settings ?: AppSettings()
+    val appearanceMode = appSettings.appearance
     val profileRepository = remember(signaling) { AuthenticatedProfileRepository(signaling.authClient) }
     val profileState by profileRepository.state.collectAsState()
     val phoneVerificationController = remember(signaling) {
@@ -345,7 +386,12 @@ private fun PupsikCallApp() {
 
     val rejectAnswerForPermission = fun() {
         val activeSession = activeCallSession
-        if (activeSession != null) authScope.launch { runCatching { signaling.declineCall(activeSession) } }
+        if (activeSession != null) {
+            autoAnswerController.onManualAction(activeSession.callId, ManualCallAction.DECLINED)
+            incomingRingtone.stopForCall(activeSession.callId)
+            authScope.launch { runCatching { signaling.declineCall(activeSession) } }
+        }
+        pendingPermissionCallId = null
         engine?.dispose("callee microphone permission denied")
         engine = null
         currentCallId = null
@@ -361,7 +407,9 @@ private fun PupsikCallApp() {
     val completeAnswer = fun() {
         val activeSession = activeCallSession ?: return
         val activeCallId = activeSession.callId.toString()
-        if (signaling.authenticatedUserId() != activeSession.calleeUserId) return
+        if (activeSession.status != AuthenticatedCallStatus.RINGING || screen != DemoScreen.IncomingCall ||
+            currentCallId != activeCallId || signaling.authenticatedUserId() != activeSession.calleeUserId
+        ) return
         val permissionGranted = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         Log.i(PermissionLogTag, "deviceId=$deviceId callId=$activeCallId microphonePermission=${if (permissionGranted) "granted" else "denied"} purpose=callee")
         if (!permissionGranted) {
@@ -399,8 +447,14 @@ private fun PupsikCallApp() {
     }
 
     val answerMicrophonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        val activeCallId = currentCallId ?: "none"
-        Log.i(PermissionLogTag, "deviceId=$deviceId callId=$activeCallId microphonePermission=${if (granted) "granted" else "denied"} purpose=callee")
+        val expectedCallId = pendingPermissionCallId
+        pendingPermissionCallId = null
+        val activeSession = activeCallSession
+        val callStillRinging = expectedCallId != null && currentCallId == expectedCallId.toString() &&
+            activeSession?.callId == expectedCallId && activeSession.status == AuthenticatedCallStatus.RINGING &&
+            screen == DemoScreen.IncomingCall && signaling.authenticatedUserId() == activeSession.calleeUserId
+        Log.i(PermissionLogTag, "deviceId=$deviceId callId=${expectedCallId ?: "none"} microphonePermission=${if (granted) "granted" else "denied"} purpose=callee")
+        if (!callStillRinging) return@rememberLauncherForActivityResult
         if (granted) {
             completeAnswer()
         } else {
@@ -408,9 +462,19 @@ private fun PupsikCallApp() {
         }
     }
     val handleAnswer = fun() {
+        val activeSession = activeCallSession ?: return
+        if (activeSession.status != AuthenticatedCallStatus.RINGING || screen != DemoScreen.IncomingCall ||
+            currentCallId != activeSession.callId.toString() || signaling.authenticatedUserId() != activeSession.calleeUserId
+        ) return
+        if (answerAttemptedCallId == activeSession.callId) return
+        answerAttemptedCallId = activeSession.callId
+        pendingPermissionCallId = activeSession.callId
+        autoAnswerController.onManualAction(activeSession.callId, ManualCallAction.ANSWERED)
+        incomingRingtone.stopForCall(activeSession.callId)
         val granted = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-        Log.i(PermissionLogTag, "deviceId=$deviceId microphonePermission=${if (granted) "granted" else "not-granted"} purpose=callee")
+        Log.i(PermissionLogTag, "deviceId=$deviceId callId=${activeSession.callId} microphonePermission=${if (granted) "granted" else "not-granted"} purpose=callee")
         if (granted) {
+            pendingPermissionCallId = null
             callError = null
             completeAnswer()
         } else {
@@ -420,6 +484,9 @@ private fun PupsikCallApp() {
 
     val handleDecline = fun() {
         val activeSession = activeCallSession ?: return
+        autoAnswerController.onManualAction(activeSession.callId, ManualCallAction.DECLINED)
+        incomingRingtone.stopForCall(activeSession.callId)
+        pendingPermissionCallId = null
         authScope.launch { runCatching { signaling.declineCall(activeSession) } }
         engine?.dispose("local decline")
         engine = null
@@ -434,6 +501,10 @@ private fun PupsikCallApp() {
 
     val endCall = fun() {
         val activeSession = activeCallSession ?: return
+        autoAnswerController.onManualAction(activeSession.callId, ManualCallAction.DECLINED)
+        outgoingRingback.stopForCall(activeSession.callId)
+        incomingRingtone.stopForCall(activeSession.callId)
+        pendingPermissionCallId = null
         authScope.launch { runCatching { signaling.finishCall(activeSession) } }
         val activeEngine = engine
         engine = null
@@ -454,6 +525,29 @@ private fun PupsikCallApp() {
         onDispose { activeEngine?.dispose() }
     }
 
+    DisposableEffect(lifecycleOwner, callSoundOutput, autoAnswerController) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> appInForeground = true
+                Lifecycle.Event.ON_STOP -> {
+                    appInForeground = false
+                    outgoingRingback.stop()
+                    incomingRingtone.stop()
+                    autoAnswerController.cancel()
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            outgoingRingback.stop()
+            incomingRingtone.stop()
+            autoAnswerController.cancel()
+            callSoundOutput.release()
+        }
+    }
+
     DisposableEffect(signaling) {
         onDispose { signaling.close() }
     }
@@ -472,6 +566,10 @@ private fun PupsikCallApp() {
 
     DisposableEffect(callHistoryRepository) {
         onDispose { callHistoryRepository.close() }
+    }
+
+    DisposableEffect(appSettingsRepository) {
+        onDispose { appSettingsRepository.close() }
     }
 
     LaunchedEffect(authState.phase, screen) {
@@ -497,10 +595,57 @@ private fun PupsikCallApp() {
     }
 
     LaunchedEffect(authState.phase) {
+        if (authState.phase in setOf(AuthPhase.SIGNING_OUT, AuthPhase.UNAUTHENTICATED, AuthPhase.ERROR)) {
+            outgoingRingback.stop()
+            incomingRingtone.stop()
+            autoAnswerController.cancel()
+            appSettingsRepository.clearAutoAnswerForSignedOut()
+        }
         if (authState.phase == AuthPhase.AUTHENTICATED) {
             if (screen == DemoScreen.SignIn) screen = DemoScreen.Contacts
         } else if (authState.phase != AuthPhase.SIGNING_OUT) {
             screen = DemoScreen.SignIn
+        }
+    }
+
+    val activeSession = activeCallSession
+    val authenticatedLocalUserId = signaling.authenticatedUserId()
+    val activeIncomingRoute = activeSession?.takeIf {
+        screen == DemoScreen.IncomingCall && currentCallId == it.callId.toString() && appInForeground &&
+            authState.phase == AuthPhase.AUTHENTICATED
+    }?.let { incomingCallRoute(authenticatedLocalUserId, it) }
+    val autoAnswerInput = AutoAnswerPolicyInput(
+        featureEnabled = appSettings.autoAnswerEnabled,
+        signedIn = authState.phase == AuthPhase.AUTHENTICATED && appInForeground,
+        incomingCallerUserId = activeIncomingRoute?.remoteUserId?.toString(),
+        routedCallerUserId = activeIncomingRoute?.remoteUserId,
+        trustedUserIds = appSettings.trustedAutoAnswerUserIds,
+        delay = appSettings.autoAnswerDelay,
+        callState = if (activeIncomingRoute != null) AutoAnswerCallState.RINGING else AutoAnswerCallState.ENDED,
+    )
+    SideEffect {
+        val soundCallId = activeSession?.callId?.takeIf { currentCallId == it.toString() }
+        val soundSignedIn = authState.phase == AuthPhase.AUTHENTICATED &&
+            authenticatedLocalUserId != null && signaling.authenticatedUserId() == authenticatedLocalUserId
+        outgoingRingback.update(
+            activeSession,
+            authenticatedLocalUserId,
+            soundCallId,
+            signedIn = soundSignedIn,
+            foreground = appInForeground && screen == DemoScreen.ActiveCall,
+        )
+        incomingRingtone.update(
+            activeSession,
+            authenticatedLocalUserId,
+            soundCallId,
+            signedIn = soundSignedIn,
+            foreground = appInForeground && screen == DemoScreen.IncomingCall &&
+                activeSession?.callId?.let { answerAttemptedCallId != it } == true,
+        )
+        autoAnswerController.update(activeIncomingRoute?.session?.callId, autoAnswerInput) {
+            if (screen == DemoScreen.IncomingCall && currentCallId == activeIncomingRoute?.session?.callId?.toString() &&
+                activeCallSession?.status == AuthenticatedCallStatus.RINGING
+            ) handleAnswer()
         }
     }
 
@@ -532,7 +677,6 @@ private fun PupsikCallApp() {
                     isAppearanceLightNavigationBars = !darkAppearance
                 }
             }
-            context.getSharedPreferences("pupsikcall.preferences", 0).edit().putString("appearance", appearanceMode.preferenceValue).apply()
         }
         Box(
             modifier = Modifier
@@ -617,8 +761,12 @@ private fun PupsikCallApp() {
                         onOpenCalls = { screen = DemoScreen.Calls },
                     )
                     DemoScreen.Settings -> PupsikSettingsScreen(
-                        appearance = appearanceMode,
-                        onAppearanceChange = { appearanceMode = it },
+                        settingsState = appSettingsState,
+                        profileState = profileState,
+                        onAppearanceChange = { mode -> authScope.launch { appSettingsRepository.setAppearance(mode) } },
+                        onAutoAnswerEnabledChange = { enabled -> authScope.launch { appSettingsRepository.setAutoAnswerEnabled(enabled) } },
+                        onAutoAnswerDelayChange = { delay -> authScope.launch { appSettingsRepository.setAutoAnswerDelay(delay) } },
+                        onRemoveTrustedUser = { userId -> authScope.launch { appSettingsRepository.removeTrustedUser(userId) } },
                         languageCodes = languageCodes,
                         languageNames = languageNames,
                         selectedLanguageIndex = selectedLanguageIndex,

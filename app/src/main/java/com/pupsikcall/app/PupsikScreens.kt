@@ -50,6 +50,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -201,8 +202,12 @@ private fun formatCallDuration(durationSeconds: Long): String {
 
 @Composable
 internal fun PupsikSettingsScreen(
-    appearance: AppearanceMode,
+    settingsState: AppSettingsState,
+    profileState: AuthenticatedProfileState,
     onAppearanceChange: (AppearanceMode) -> Unit,
+    onAutoAnswerEnabledChange: (Boolean) -> Unit,
+    onAutoAnswerDelayChange: (AutoAnswerDelay) -> Unit,
+    onRemoveTrustedUser: (java.util.UUID) -> Unit,
     languageCodes: List<String>,
     languageNames: List<String>,
     selectedLanguageIndex: Int,
@@ -212,9 +217,14 @@ internal fun PupsikSettingsScreen(
 ) {
     val palette = LocalPupsikPalette.current
     val lightUi = palette == PupsikPalettes.Light
+    val settings = (settingsState as? AppSettingsState.Ready)?.settings
+    val appearance = settings?.appearance ?: AppearanceMode.SYSTEM
+    val accountProfile = profileState as? AuthenticatedProfileState.Profile
     Column(Modifier.fillMaxSize().background(palette.background)) {
         ScreenHeader(stringResource(R.string.settings))
-        Column(Modifier.weight(1f).padding(horizontal = PupsikSpacing.large)) {
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = PupsikSpacing.large),
+        ) {
             Text(stringResource(R.string.appearance), color = palette.text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = PupsikSpacing.large, bottom = PupsikSpacing.medium))
             Row(
                 Modifier.fillMaxWidth().clip(PupsikShapes.control).background(palette.surface)
@@ -237,6 +247,93 @@ internal fun PupsikSettingsScreen(
                             .background(if (selected && lightUi) palette.bronze else if (selected) palette.surfaceRaised else Color.Transparent)
                             .clickable { onAppearanceChange(mode) }.padding(vertical = 12.dp),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
+            }
+            Text(
+                stringResource(R.string.call_settings),
+                color = palette.text,
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(top = PupsikSpacing.xLarge, bottom = PupsikSpacing.small),
+            )
+            when (settingsState) {
+                AppSettingsState.Loading -> Text(stringResource(R.string.settings_loading), color = palette.muted)
+                AppSettingsState.Error -> Text(stringResource(R.string.settings_storage_error), color = palette.danger)
+                is AppSettingsState.Ready -> {
+                    val currentSettings = settingsState.settings
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = PupsikSpacing.small),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.auto_answer), color = palette.text, style = MaterialTheme.typography.titleMedium)
+                            Text(stringResource(R.string.auto_answer_description), color = palette.muted, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(checked = currentSettings.autoAnswerEnabled, onCheckedChange = onAutoAnswerEnabledChange)
+                    }
+                    Text(stringResource(R.string.auto_answer_pending), color = palette.muted, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        stringResource(R.string.auto_answer_delay),
+                        color = palette.text,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(top = PupsikSpacing.small, bottom = PupsikSpacing.small),
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().clip(PupsikShapes.control).background(palette.surface)
+                            .then(if (lightUi) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.control) else Modifier)
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        AutoAnswerDelay.entries.forEach { delay ->
+                            val selected = delay == currentSettings.autoAnswerDelay
+                            val label = when (delay) {
+                                AutoAnswerDelay.ZERO -> stringResource(R.string.auto_answer_delay_zero)
+                                AutoAnswerDelay.TWO -> stringResource(R.string.auto_answer_delay_two)
+                                AutoAnswerDelay.FIVE -> stringResource(R.string.auto_answer_delay_five)
+                            }
+                            Text(
+                                text = label,
+                                color = if (selected && lightUi) Color.White else if (selected) palette.text else palette.muted,
+                                style = MaterialTheme.typography.labelLarge,
+                                modifier = Modifier.weight(1f).clip(PupsikShapes.control)
+                                    .background(if (selected && lightUi) palette.bronze else if (selected) palette.surfaceRaised else Color.Transparent)
+                                    .clickable { onAutoAnswerDelayChange(delay) }.padding(vertical = 12.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            )
+                        }
+                    }
+                    Text(
+                        stringResource(R.string.trusted_auto_answer_contacts),
+                        color = palette.text,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(top = PupsikSpacing.large, bottom = PupsikSpacing.small),
+                    )
+                    Text(stringResource(R.string.trusted_auto_answer_explanation), color = palette.muted, style = MaterialTheme.typography.bodySmall)
+                    if (currentSettings.trustedAutoAnswerUserIds.isEmpty()) {
+                        Text(
+                            stringResource(R.string.trusted_auto_answer_empty),
+                            color = palette.muted,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(vertical = PupsikSpacing.medium),
+                        )
+                    } else {
+                        currentSettings.trustedAutoAnswerUserIds.sortedBy(java.util.UUID::toString).forEach { userId ->
+                            Row(
+                                Modifier.fillMaxWidth().padding(vertical = PupsikSpacing.xSmall),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(userId.toString(), color = palette.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                                TextButton(onClick = { onRemoveTrustedUser(userId) }) {
+                                    Text(stringResource(R.string.remove_trusted_contact), color = palette.danger)
+                                }
+                            }
+                        }
+                    }
+                    Text(
+                        stringResource(R.string.trusted_auto_answer_unavailable),
+                        color = palette.muted,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = PupsikSpacing.small),
                     )
                 }
             }
@@ -266,6 +363,20 @@ internal fun PupsikSettingsScreen(
                     }
                 }
             }
+            Text(stringResource(R.string.account), color = palette.text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = PupsikSpacing.xLarge, bottom = PupsikSpacing.small))
+            Text(
+                when (profileState) {
+                    is AuthenticatedProfileState.Profile -> profileState.profile.displayName
+                        ?: stringResource(R.string.profile_name_not_set)
+                    is AuthenticatedProfileState.MissingProfile -> stringResource(R.string.profile_missing)
+                    AuthenticatedProfileState.Loading -> stringResource(R.string.profile_loading)
+                    AuthenticatedProfileState.SignedOut -> stringResource(R.string.profile_signed_out)
+                    is AuthenticatedProfileState.Error -> stringResource(R.string.profile_error)
+                },
+                color = palette.text,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            accountProfile?.email?.let { Text(it, color = palette.muted, style = MaterialTheme.typography.bodySmall) }
             Row(
                 Modifier.fillMaxWidth()
                     .then(if (lightUi) Modifier.clip(PupsikShapes.control).background(palette.surfaceRaised).border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.control) else Modifier)
