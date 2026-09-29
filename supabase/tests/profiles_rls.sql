@@ -59,7 +59,10 @@ begin
     from public.get_public_profiles(array['00000000-0000-4000-8000-000000000102'::uuid]) as profile_row;
 
     if public_profile is null
-        or jsonb_object_length(public_profile) <> 3
+        or coalesce((
+            select array_agg(profile_key order by profile_key)
+            from jsonb_object_keys(public_profile) as profile_keys(profile_key)
+        ), array[]::text[]) <> array['avatar_path', 'display_name', 'user_id']::text[]
         or public_profile ->> 'user_id' <> '00000000-0000-4000-8000-000000000102'
         or public_profile ->> 'display_name' <> 'Other Profile'
         or public_profile ?| array['email', 'phone', 'user_metadata', 'app_metadata', 'access_token'] then
