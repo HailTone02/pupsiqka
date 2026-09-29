@@ -310,6 +310,8 @@ private fun PupsikCallApp() {
     val messagingRepository = remember(signaling) { MessagingRepository(SupabaseMessagingGateway(signaling.authClient)) }
     val conversationListState by messagingRepository.conversationState.collectAsState()
     val messageListState by messagingRepository.messageState.collectAsState()
+    val callHistoryRepository = remember(signaling) { CallHistoryRepository(signaling.authClient) }
+    val callHistoryState by callHistoryRepository.state.collectAsState()
     val selectedConversation = (conversationListState as? ConversationListState.Loaded)
         ?.conversations?.firstOrNull { it.id.toString() == selectedConversationId }
     val localizedAuthMessage = authState.message?.let { stringResource(it.stringResourceId()) }
@@ -468,9 +470,16 @@ private fun PupsikCallApp() {
         onDispose { messagingRepository.close() }
     }
 
+    DisposableEffect(callHistoryRepository) {
+        onDispose { callHistoryRepository.close() }
+    }
+
     LaunchedEffect(authState.phase, screen) {
         if (authState.phase == AuthPhase.AUTHENTICATED && screen == DemoScreen.Messages) {
             messagingRepository.loadConversations()
+        }
+        if (authState.phase == AuthPhase.AUTHENTICATED && screen == DemoScreen.Calls) {
+            callHistoryRepository.loadHistory()
         }
     }
 
@@ -552,6 +561,12 @@ private fun PupsikCallApp() {
                         onOpenProfile = { screen = DemoScreen.Profile },
                     )
                     DemoScreen.Calls -> PupsikCallsScreen(
+                        state = callHistoryState,
+                        onRetry = { authScope.launch { callHistoryRepository.loadHistory() } },
+                        onLoadMore = {
+                            val cursor = (callHistoryState as? CallHistoryState.Loaded)?.nextCursor
+                            if (cursor != null) authScope.launch { callHistoryRepository.loadHistory(cursor) }
+                        },
                         onOpenContacts = { screen = DemoScreen.Contacts },
                         onOpenMessages = { screen = DemoScreen.Messages },
                     )

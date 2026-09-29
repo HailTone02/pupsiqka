@@ -45,6 +45,17 @@
     <string name="profile_saved">Profile saved.</string>
     <string name="recent">Recent</string>
     <string name="no_recent_calls">No recent calls</string>
+    <string name="call_history_loading">Loading call history</string>
+    <string name="call_history_error">Call history could not be loaded.</string>
+    <string name="call_history_retry">Try again</string>
+    <string name="call_history_load_more">Load older calls</string>
+    <string name="call_history_incoming">Incoming</string>
+    <string name="call_history_outgoing">Outgoing</string>
+    <string name="call_history_completed">Completed</string>
+    <string name="call_history_declined">Declined</string>
+    <string name="call_history_cancelled">Cancelled</string>
+    <string name="call_history_missed">Missed</string>
+    <string name="call_history_failed">Failed</string>
     <string name="no_messages">No messages yet</string>
     <string name="start_conversation">Start a conversation</string>
     <string name="message_hint">Message</string>

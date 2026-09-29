@@ -303,6 +303,70 @@ begin
 end;
 $$;
 
+create or replace function public.list_call_history(
+    p_before_created_at timestamptz default null,
+    p_before_call_id uuid default null,
+    p_limit integer default 50
+)
+returns table (
+    call_id uuid,
+    counterpart_user_id uuid,
+    direction text,
+    status text,
+    created_at timestamptz,
+    accepted_at timestamptz,
+    connected_at timestamptz,
+    ended_at timestamptz,
+    duration_seconds bigint
+)
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog, public
+as $$
+declare
+    authenticated_user_id uuid := auth.uid();
+begin
+    if authenticated_user_id is null then
+        raise exception 'Authentication required' using errcode = '42501';
+    end if;
+    if p_limit is null or p_limit not between 1 and 100
+        or ((p_before_created_at is null) <> (p_before_call_id is null)) then
+        raise exception 'Invalid call-history page request' using errcode = '22023';
+    end if;
+
+    return query
+    select call_session.id,
+           case
+               when call_session.caller_user_id = authenticated_user_id then call_session.callee_user_id
+               else call_session.caller_user_id
+           end,
+           case
+               when call_session.caller_user_id = authenticated_user_id then 'outgoing'
+               else 'incoming'
+           end,
+           call_session.status,
+           call_session.created_at,
+           call_session.accepted_at,
+           call_session.connected_at,
+           call_session.ended_at,
+           case
+               when call_session.connected_at is not null and call_session.ended_at is not null
+                   then floor(extract(epoch from (call_session.ended_at - call_session.connected_at)))::bigint
+               else null
+           end
+    from public.call_sessions as call_session
+    where authenticated_user_id in (call_session.caller_user_id, call_session.callee_user_id)
+      and call_session.status in ('completed', 'declined', 'cancelled', 'missed', 'failed')
+      and (
+          p_before_created_at is null
+          or (call_session.created_at, call_session.id) < (p_before_created_at, p_before_call_id)
+      )
+    order by call_session.created_at desc, call_session.id desc
+    limit p_limit;
+end;
+$$;
+
 revoke all on function public.create_call_session(uuid, uuid) from public, anon, authenticated;
 revoke all on function public.list_pending_call_sessions() from public, anon, authenticated;
 revoke all on function public.ring_call_session(uuid) from public, anon, authenticated;
@@ -312,6 +376,7 @@ revoke all on function public.cancel_call_session(uuid) from public, anon, authe
 revoke all on function public.mark_call_connected(uuid) from public, anon, authenticated;
 revoke all on function public.finish_call_session(uuid) from public, anon, authenticated;
 revoke all on function public.fail_call_session(uuid, text) from public, anon, authenticated;
+revoke all on function public.list_call_history(timestamptz, uuid, integer) from public, anon, authenticated;
 grant execute on function public.create_call_session(uuid, uuid) to authenticated;
 grant execute on function public.list_pending_call_sessions() to authenticated;
 grant execute on function public.ring_call_session(uuid) to authenticated;
@@ -321,6 +386,7 @@ grant execute on function public.cancel_call_session(uuid) to authenticated;
 grant execute on function public.mark_call_connected(uuid) to authenticated;
 grant execute on function public.finish_call_session(uuid) to authenticated;
 grant execute on function public.fail_call_session(uuid, text) to authenticated;
+grant execute on function public.list_call_history(timestamptz, uuid, integer) to authenticated;
 
 do $$
 begin

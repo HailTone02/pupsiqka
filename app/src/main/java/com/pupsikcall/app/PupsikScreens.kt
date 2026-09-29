@@ -16,12 +16,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -84,31 +87,116 @@ import kotlin.math.roundToInt
 
 @Composable
 internal fun PupsikCallsScreen(
+    state: CallHistoryState,
+    onRetry: () -> Unit,
+    onLoadMore: () -> Unit,
     onOpenContacts: () -> Unit,
     onOpenMessages: () -> Unit,
 ) {
     val palette = LocalPupsikPalette.current
-    val lightUi = palette == PupsikPalettes.Light
     Column(Modifier.fillMaxSize().background(palette.background)) {
         ScreenHeader(stringResource(R.string.calls))
-        Column(
-            Modifier.weight(1f).fillMaxWidth().padding(horizontal = PupsikSpacing.medium),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Column(
-                Modifier.fillMaxWidth()
-                    .then(if (lightUi) Modifier.clip(PupsikShapes.panel).background(palette.surfaceRaised).border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.panel) else Modifier)
-                    .padding(PupsikSpacing.large),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Icon(Icons.Filled.Call, contentDescription = null, tint = palette.muted, modifier = Modifier.size(44.dp))
+        when (val currentState = state) {
+            CallHistoryState.Loading -> CallHistoryMessageState {
+                CircularProgressIndicator(color = palette.bronze)
                 Spacer(Modifier.height(PupsikSpacing.medium))
-                Text(stringResource(R.string.no_recent_calls), color = palette.text, style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.call_history_loading), color = palette.muted)
+            }
+            CallHistoryState.Empty -> CallHistoryMessageState {
+                Icon(Icons.Filled.Call, contentDescription = null, tint = palette.muted, modifier = Modifier.size(34.dp))
+                Spacer(Modifier.height(PupsikSpacing.medium))
+                Text(stringResource(R.string.no_recent_calls), color = palette.muted, style = MaterialTheme.typography.bodyLarge)
+            }
+            CallHistoryState.SignedOut -> CallHistoryMessageState {
+                Text(stringResource(R.string.profile_signed_out), color = palette.muted)
+            }
+            CallHistoryState.Error -> CallHistoryMessageState {
+                Text(stringResource(R.string.call_history_error), color = palette.danger)
+                TextButton(onClick = onRetry) {
+                    Text(stringResource(R.string.call_history_retry), color = palette.bronze)
+                }
+            }
+            is CallHistoryState.Loaded -> {
+                LazyColumn(
+                    Modifier.weight(1f).fillMaxWidth().padding(horizontal = PupsikSpacing.medium),
+                    verticalArrangement = Arrangement.spacedBy(PupsikSpacing.small),
+                ) {
+                    items(currentState.calls, key = { it.callId }) { call ->
+                        CallHistoryRow(call)
+                    }
+                    if (currentState.nextCursor != null) {
+                        item {
+                            TextButton(onClick = onLoadMore, enabled = !currentState.loadingMore) {
+                                if (currentState.loadingMore) {
+                                    CircularProgressIndicator(Modifier.size(16.dp), color = palette.bronze)
+                                } else {
+                                    Text(stringResource(R.string.call_history_load_more), color = palette.bronze)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         PupsikBottomNavigation("calls", onOpenContacts, {}, onOpenMessages)
     }
+}
+
+@Composable
+private fun ColumnScope.CallHistoryMessageState(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.weight(1f).fillMaxWidth().padding(horizontal = PupsikSpacing.medium),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        content = content,
+    )
+}
+
+@Composable
+private fun CallHistoryRow(call: CallHistoryRecord) {
+    val palette = LocalPupsikPalette.current
+    val directionLabel = stringResource(
+        if (call.direction == CallHistoryDirection.Incoming) R.string.call_history_incoming else R.string.call_history_outgoing,
+    )
+    val counterpartName = call.counterpartDisplayName?.takeIf(String::isNotBlank)
+        ?: call.counterpartUserId.toString()
+    Row(
+        Modifier.fillMaxWidth().clip(PupsikShapes.panel).background(palette.surfaceRaised)
+            .then(if (palette == PupsikPalettes.Light) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.panel) else Modifier)
+            .padding(PupsikSpacing.medium),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Call, contentDescription = null, tint = palette.bronze, modifier = Modifier.size(22.dp))
+        Column(Modifier.weight(1f).padding(start = PupsikSpacing.medium)) {
+            Text(counterpartName, color = palette.text, style = MaterialTheme.typography.titleMedium)
+            Text(
+                "$directionLabel - ${stringResource(call.status.historyLabelResource())}",
+                color = palette.muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                listOfNotNull(call.createdAt, call.durationSeconds?.let(::formatCallDuration)).joinToString(" - "),
+                color = palette.muted,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+private fun AuthenticatedCallStatus.historyLabelResource(): Int = when (this) {
+    AuthenticatedCallStatus.COMPLETED -> R.string.call_history_completed
+    AuthenticatedCallStatus.DECLINED -> R.string.call_history_declined
+    AuthenticatedCallStatus.CANCELLED -> R.string.call_history_cancelled
+    AuthenticatedCallStatus.MISSED -> R.string.call_history_missed
+    AuthenticatedCallStatus.FAILED -> R.string.call_history_failed
+    else -> R.string.call_history_error
+}
+
+private fun formatCallDuration(durationSeconds: Long): String {
+    val minutes = durationSeconds / 60
+    val seconds = durationSeconds % 60
+    return "%d:%02d".format(minutes, seconds)
 }
 
 @Composable
