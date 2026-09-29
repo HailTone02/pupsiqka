@@ -18,6 +18,19 @@ where user_id in (
 
 do $$
 begin
+    if has_table_privilege('authenticated', 'public.profiles', 'INSERT')
+        or has_table_privilege('authenticated', 'public.profiles', 'DELETE')
+        or has_column_privilege('authenticated', 'public.profiles', 'user_id', 'UPDATE')
+        or has_column_privilege('authenticated', 'public.profiles', 'created_at', 'UPDATE')
+        or has_column_privilege('authenticated', 'public.profiles', 'updated_at', 'UPDATE')
+        or has_function_privilege('anon', 'public.get_public_profiles(uuid[])', 'EXECUTE') then
+        raise exception 'profile grants exceed the approved client access';
+    end if;
+end;
+$$;
+
+do $$
+begin
     if (select count(*) from public.profiles where user_id in (
         '00000000-0000-4000-8000-000000000101',
         '00000000-0000-4000-8000-000000000102'
@@ -63,6 +76,20 @@ begin
         null;
     end;
 
+    begin
+        perform * from public.get_public_profiles(array[]::uuid[]);
+        raise exception 'public profile API accepted an empty ID list';
+    exception when invalid_parameter_value then
+        null;
+    end;
+
+    begin
+        perform * from public.get_public_profiles(null::uuid[]);
+        raise exception 'public profile API accepted a null ID list';
+    exception when invalid_parameter_value then
+        null;
+    end;
+
     update public.profiles set display_name = 'Updated own profile'
     where user_id = '00000000-0000-4000-8000-000000000101';
     get diagnostics affected_rows = row_count;
@@ -78,6 +105,14 @@ begin
         null;
     end;
 
+    begin
+        delete from public.profiles
+        where user_id = '00000000-0000-4000-8000-000000000101';
+        raise exception 'authenticated user deleted a profile directly';
+    exception when insufficient_privilege then
+        null;
+    end;
+
     update public.profiles set display_name = 'Unauthorized update'
     where user_id = '00000000-0000-4000-8000-000000000102';
     get diagnostics affected_rows = row_count;
@@ -89,6 +124,22 @@ begin
         update public.profiles set user_id = '00000000-0000-4000-8000-000000000102'
         where user_id = '00000000-0000-4000-8000-000000000101';
         raise exception 'authenticated user changed profile identity';
+    exception when insufficient_privilege then
+        null;
+    end;
+end;
+$$;
+
+reset role;
+set local role anon;
+
+do $$
+begin
+    begin
+        perform * from public.get_public_profiles(array[
+            '00000000-0000-4000-8000-000000000102'::uuid
+        ]);
+        raise exception 'anonymous user executed the public profile API';
     exception when insufficient_privilege then
         null;
     end;
