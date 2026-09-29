@@ -33,6 +33,16 @@
     <string name="calls">Calls</string>
     <string name="messages">Messages</string>
     <string name="profile">Profile</string>
+    <string name="profile_loading">Loading profile</string>
+    <string name="profile_signed_out">You are signed out.</string>
+    <string name="profile_missing">Your profile is not available yet.</string>
+    <string name="profile_error">Could not load or save your profile.</string>
+    <string name="profile_retry">Retry</string>
+    <string name="profile_name_not_set">Display name not set</string>
+    <string name="profile_display_name">Display name</string>
+    <string name="profile_invalid_name">Enter a display name of 1 to 80 characters.</string>
+    <string name="save_profile">Save profile</string>
+    <string name="profile_saved">Profile saved.</string>
     <string name="recent">Recent</string>
     <string name="no_recent_calls">No recent calls</string>
     <string name="no_messages">No messages yet</string>

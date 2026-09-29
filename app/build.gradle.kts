@@ -67,6 +67,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("io.github.webrtc-sdk:android:150.7871.01")
     implementation("io.github.jan-tennert.supabase:auth-kt:3.2.6")
+    implementation("io.github.jan-tennert.supabase:postgrest-kt:3.2.6")
     implementation("io.github.jan-tennert.supabase:realtime-kt:3.2.6")
     implementation("io.ktor:ktor-client-okhttp:3.3.1")
     testImplementation("junit:junit:4.13.2")

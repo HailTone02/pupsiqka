@@ -5,6 +5,7 @@ import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.logging.LogLevel
+import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.realtime.RealtimeChannel
 import io.github.jan.supabase.realtime.broadcast as sendBroadcast
@@ -429,6 +430,7 @@ class SupabaseCallSignaling(
                     autoSaveToStorage = true
                 }
                 install(Realtime)
+                install(Postgrest)
             }
         }
 

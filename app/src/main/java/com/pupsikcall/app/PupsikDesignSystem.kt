@@ -46,17 +46,17 @@ internal data class PupsikPalette(
 
 internal object PupsikPalettes {
     val Light = PupsikPalette(
-        background = Color(0xFFF5F0E7),
-        surface = Color(0xFFECE4D7),
-        surfaceRaised = Color(0xFFFFFCF6),
-        field = Color(0xFFF9F5ED),
-        outline = Color(0xFFD7C9B3),
-        bronze = Color(0xFF986B3F),
-        caramel = Color(0xFFC38A50),
-        glow = Color(0xFFE8B777),
-        text = Color(0xFF33291F),
-        muted = Color(0xFF786D60),
-        subtle = Color(0xFFA39889),
+        background = Color(0xFFF7F3EB),
+        surface = Color(0xFFEDE5D9),
+        surfaceRaised = Color(0xFFFFFCF7),
+        field = Color(0xFFFCFAF5),
+        outline = Color(0xFFD9CCBA),
+        bronze = Color(0xFF946A42),
+        caramel = Color(0xFFBD9160),
+        glow = Color(0xFFE6C18F),
+        text = Color(0xFF342B22),
+        muted = Color(0xFF786E63),
+        subtle = Color(0xFFA3988B),
         online = Color(0xFF5E8164),
         danger = Color(0xFFB44A42),
         callGlass = Color(0xA8FFF9F0),
@@ -138,7 +138,7 @@ internal fun PupsikTheme(mode: AppearanceMode, content: @Composable () -> Unit) 
             error = palette.danger,
         )
     }
-    val typography = Typography(
+    val baseTypography = Typography(
         displayMedium = TextStyle(fontFamily = FontFamily.Serif, fontWeight = FontWeight.Medium, fontSize = 38.sp, lineHeight = 44.sp),
         headlineLarge = TextStyle(fontFamily = FontFamily.Serif, fontWeight = FontWeight.Medium, fontSize = 32.sp, lineHeight = 38.sp),
         headlineMedium = TextStyle(fontFamily = FontFamily.Serif, fontWeight = FontWeight.Medium, fontSize = 26.sp, lineHeight = 32.sp),
@@ -147,6 +147,12 @@ internal fun PupsikTheme(mode: AppearanceMode, content: @Composable () -> Unit) 
         bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 23.sp),
         bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
         labelLarge = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 20.sp),
+    )
+    val typography = if (useDark) baseTypography else baseTypography.copy(
+        displayMedium = baseTypography.displayMedium.copy(fontSize = 36.sp, lineHeight = 42.sp),
+        headlineLarge = baseTypography.headlineLarge.copy(fontSize = 30.sp, lineHeight = 36.sp),
+        headlineMedium = baseTypography.headlineMedium.copy(fontSize = 25.sp, lineHeight = 31.sp),
+        bodyLarge = baseTypography.bodyLarge.copy(lineHeight = 24.sp),
     )
     val shapes = Shapes(
         extraSmall = RoundedCornerShape(6.dp),

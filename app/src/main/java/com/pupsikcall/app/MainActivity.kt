@@ -160,6 +160,7 @@ private fun PupsikCallApp() {
     var appearanceMode by rememberSaveable {
         mutableStateOf(AppearanceMode.fromPreference(context.getSharedPreferences("pupsikcall.preferences", 0).getString("appearance", "system")))
     }
+    // Legacy fixed A/B identity for test calling only; profile identity comes from Supabase Auth.
     val deviceId = BuildConfig.PUPSIKCALL_DEVICE_ID.ifBlank { "pupsik-a" }
     val languageCodes = stringArrayResource(R.array.supported_language_codes).toList()
     val languageNames = stringArrayResource(R.array.supported_language_names).toList()
@@ -300,6 +301,8 @@ private fun PupsikCallApp() {
     }
     val authController = remember(signaling) { SupabaseAuthController(signaling.authClient) }
     val authState by authController.state.collectAsState()
+    val profileRepository = remember(signaling) { AuthenticatedProfileRepository(signaling.authClient) }
+    val profileState by profileRepository.state.collectAsState()
     val localizedAuthMessage = authState.message?.let { stringResource(it.stringResourceId()) }
     val authScope = rememberCoroutineScope()
 
@@ -504,6 +507,10 @@ private fun PupsikCallApp() {
         onDispose { authController.close() }
     }
 
+    DisposableEffect(profileRepository) {
+        onDispose { profileRepository.close() }
+    }
+
     LaunchedEffect(authState.phase) {
         if (authState.phase == AuthPhase.AUTHENTICATED) {
             if (screen == DemoScreen.SignIn) screen = DemoScreen.Contacts
@@ -601,12 +608,11 @@ private fun PupsikCallApp() {
                         onLogout = { authScope.launch { authController.logout() } },
                     )
                     DemoScreen.Profile -> PupsikProfileScreen(
-                        email = authState.email,
-                        deviceId = deviceId,
-                        peerName = peerName,
-                        peerOnline = peerOnline,
+                        state = profileState,
                         onBack = { screen = DemoScreen.Settings },
                         onLogout = { authScope.launch { authController.logout() } },
+                        onRetry = profileRepository::reload,
+                        onSaveDisplayName = { name -> profileRepository.updateDisplayName(name) },
                     )
                     DemoScreen.IncomingCall -> PupsikIncomingCallScreen(
                         peerName = peerName,
@@ -665,6 +671,8 @@ private fun SignInScreen(
     var email by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     val busy = state.isBusy
+    val palette = LocalPupsikPalette.current
+    val lightUi = palette == PupsikPalettes.Light
 
     Column(
         modifier = Modifier
@@ -684,83 +692,90 @@ private fun SignInScreen(
             fontSize = 15.sp,
         )
         Spacer(Modifier.height(10.dp))
-        LanguageSelector(languageCodes, languageNames, selectedLanguageIndex, onLanguageSelected)
-        Spacer(Modifier.height(20.dp))
-        OutlinedTextField(
-            value = email,
-            onValueChange = { email = it },
-            modifier = Modifier.fillMaxWidth().height(60.dp),
-            enabled = !busy,
-            placeholder = { Text(stringResource(R.string.email), fontSize = 15.sp) },
-            leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(21.dp)) },
-            singleLine = true,
-            shape = PupsikShapes.panel,
-            colors = signInFieldColors(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
-        )
-        Spacer(Modifier.height(13.dp))
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it },
-            modifier = Modifier.fillMaxWidth().height(60.dp),
-            enabled = !busy,
-            placeholder = { Text(stringResource(R.string.password), fontSize = 15.sp) },
-            leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(21.dp)) },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            shape = PupsikShapes.panel,
-            colors = signInFieldColors(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        )
-        Spacer(Modifier.height(18.dp))
-        state.message?.let { message ->
-            Text(
-            stringResource(message.stringResourceId()),
-            color = if (message == AuthMessage.CONFIRMATION_REQUIRED) SecondaryText else DeclineRed,
-                fontSize = 13.sp,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-            )
-        }
-        Button(
-            enabled = !busy,
-            onClick = {
-                val submittedPassword = password
-                password = ""
-                if (registering) onRegister(email, submittedPassword) else onSignIn(email, submittedPassword)
-            },
-            modifier = Modifier.fillMaxWidth().height(58.dp),
-            shape = PupsikShapes.panel,
-            colors = ButtonDefaults.buttonColors(containerColor = PrimaryPurple),
+        Column(
+            Modifier.fillMaxWidth()
+                .then(if (lightUi) Modifier.clip(PupsikShapes.panel).background(palette.surfaceRaised).border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.panel) else Modifier)
+                .padding(if (lightUi) PupsikSpacing.medium else 0.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            if (busy) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = MainText, strokeWidth = 2.dp)
-                Spacer(Modifier.size(10.dp))
-            }
-            Text(
-                when {
-                    state.phase == AuthPhase.REGISTERING -> stringResource(R.string.creating_account)
-                    state.phase == AuthPhase.LOGGING_IN -> stringResource(R.string.signing_in)
-                    registering -> stringResource(R.string.create_account)
-                    else -> stringResource(R.string.sign_in)
-                },
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
+            LanguageSelector(languageCodes, languageNames, selectedLanguageIndex, onLanguageSelected)
+            Spacer(Modifier.height(20.dp))
+            OutlinedTextField(
+                value = email,
+                onValueChange = { email = it },
+                modifier = Modifier.fillMaxWidth().height(60.dp),
+                enabled = !busy,
+                placeholder = { Text(stringResource(R.string.email), fontSize = 15.sp) },
+                leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(21.dp)) },
+                singleLine = true,
+                shape = PupsikShapes.panel,
+                colors = signInFieldColors(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
             )
-        }
-        Spacer(Modifier.height(17.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                stringResource(if (registering) R.string.already_registered else R.string.no_account),
-                color = SecondaryText,
-                fontSize = 13.sp,
+            Spacer(Modifier.height(13.dp))
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                modifier = Modifier.fillMaxWidth().height(60.dp),
+                enabled = !busy,
+                placeholder = { Text(stringResource(R.string.password), fontSize = 15.sp) },
+                leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(21.dp)) },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                shape = PupsikShapes.panel,
+                colors = signInFieldColors(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             )
-            TextButton(enabled = !busy, onClick = { registering = !registering; password = "" }) {
+            Spacer(Modifier.height(18.dp))
+            state.message?.let { message ->
                 Text(
-                    stringResource(if (registering) R.string.sign_in else R.string.create_account),
-                    color = LightPurple,
+                    stringResource(message.stringResourceId()),
+                    color = if (message == AuthMessage.CONFIRMATION_REQUIRED) SecondaryText else DeclineRed,
                     fontSize = 13.sp,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                )
+            }
+            Button(
+                enabled = !busy,
+                onClick = {
+                    val submittedPassword = password
+                    password = ""
+                    if (registering) onRegister(email, submittedPassword) else onSignIn(email, submittedPassword)
+                },
+                modifier = Modifier.fillMaxWidth().height(58.dp),
+                shape = PupsikShapes.panel,
+                colors = ButtonDefaults.buttonColors(containerColor = PrimaryPurple),
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = MainText, strokeWidth = 2.dp)
+                    Spacer(Modifier.size(10.dp))
+                }
+                Text(
+                    when {
+                        state.phase == AuthPhase.REGISTERING -> stringResource(R.string.creating_account)
+                        state.phase == AuthPhase.LOGGING_IN -> stringResource(R.string.signing_in)
+                        registering -> stringResource(R.string.create_account)
+                        else -> stringResource(R.string.sign_in)
+                    },
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
+            }
+            Spacer(Modifier.height(17.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(if (registering) R.string.already_registered else R.string.no_account),
+                    color = SecondaryText,
+                    fontSize = 13.sp,
+                )
+                TextButton(enabled = !busy, onClick = { registering = !registering; password = "" }) {
+                    Text(
+                        stringResource(if (registering) R.string.sign_in else R.string.create_account),
+                        color = LightPurple,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         }
     }
