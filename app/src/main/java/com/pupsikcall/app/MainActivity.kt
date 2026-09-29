@@ -91,6 +91,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
 
 private val AppBackground: Color @Composable get() = LocalPupsikPalette.current.background
@@ -143,6 +145,7 @@ class MainActivity : AppCompatActivity() {
 @Composable
 private fun PupsikCallApp() {
     var screen by rememberSaveable { mutableStateOf(DemoScreen.SignIn) }
+    var selectedConversationId by rememberSaveable { mutableStateOf<String?>(null) }
     var isMuted by rememberSaveable { mutableStateOf(false) }
     var speakerEnabled by rememberSaveable { mutableStateOf(true) }
     var callState by remember { mutableStateOf(WebRtcCallState.IDLE) }
@@ -150,229 +153,201 @@ private fun PupsikCallApp() {
     var iceDiagnostics by remember { mutableStateOf("") }
     var engine by remember { mutableStateOf<WebRtcAudioCallEngine?>(null) }
     var currentCallId by remember { mutableStateOf<String?>(null) }
-    var peerDeviceId by remember { mutableStateOf<String?>(null) }
+    var activeCallSession by remember { mutableStateOf<AuthenticatedCallSession?>(null) }
+    var callParticipantName by remember { mutableStateOf("") }
     var pendingRemoteOffer by remember { mutableStateOf<String?>(null) }
     var pendingRemoteIce by remember { mutableStateOf(emptyList<LocalIceCandidate>()) }
-    var peerOnline by remember { mutableStateOf(false) }
     var calleeAccepted by remember { mutableStateOf(false) }
-    var signalingInstance: SupabaseCallSignaling? by remember { mutableStateOf(null) }
     val context = LocalContext.current
+    val authScope = rememberCoroutineScope()
     var appearanceMode by rememberSaveable {
         mutableStateOf(AppearanceMode.fromPreference(context.getSharedPreferences("pupsikcall.preferences", 0).getString("appearance", "system")))
     }
-    // Legacy fixed A/B identity for test calling only; profile identity comes from Supabase Auth.
-    val deviceId = BuildConfig.PUPSIKCALL_DEVICE_ID.ifBlank { "pupsik-a" }
+    val deviceId = "authenticated-call"
     val languageCodes = stringArrayResource(R.array.supported_language_codes).toList()
     val languageNames = stringArrayResource(R.array.supported_language_names).toList()
     val applicationLocaleTags = AppCompatDelegate.getApplicationLocales().toLanguageTags()
     val systemLocaleTag = LocalConfiguration.current.locales.get(0)?.toLanguageTag().orEmpty()
     val selectedLanguageIndex = selectedLanguageIndex(languageCodes, applicationLocaleTags, systemLocaleTag)
-    val peerNameResource = when (peerDeviceId) {
-        "pupsik-a" -> R.string.peer_a
-        "pupsik-b" -> R.string.peer_b
-        else -> if (deviceId == "pupsik-a") R.string.peer_b else R.string.peer_a
+    val defaultCallParticipantName = stringResource(R.string.call_participant)
+    var signalingRef: AuthenticatedCallSignaling? = null
+
+    fun isCurrentCall(session: AuthenticatedCallSession): Boolean {
+        val localUserId = signalingRef?.authenticatedUserId() ?: return false
+        return currentCallId == session.callId.toString()
+            && activeCallSession?.callId == session.callId
+            && session.remoteUserId(localUserId) != null
     }
-    val peerName = stringResource(peerNameResource)
+
+    fun createCallEngine(session: AuthenticatedCallSession): WebRtcAudioCallEngine =
+        WebRtcAudioCallEngine(context.applicationContext, deviceId, session.callId.toString(), object : WebRtcAudioCallEngine.Listener {
+            override fun onStateChanged(state: WebRtcCallState, error: String?) {
+                if (!isCurrentCall(session)) return
+                callState = state
+                callError = error
+                if (state == WebRtcCallState.CONNECTED) authScope.launch { signalingRef?.markConnected(session) }
+                if (state == WebRtcCallState.FAILED) authScope.launch { runCatching { signalingRef?.failCall(session, "media_failed") } }
+            }
+
+            override fun onLocalDescription(type: String, sdp: String) {
+                if (!isCurrentCall(session)) return
+                if (type == "offer") signalingRef?.sendOffer(session, sdp)
+                else if (type == "answer") signalingRef?.sendAnswer(session, sdp)
+            }
+
+            override fun onLocalIceCandidate(candidate: LocalIceCandidate) {
+                if (isCurrentCall(session)) signalingRef?.sendIceCandidate(session, candidate)
+            }
+
+            override fun onIceDiagnosticsChanged(diagnostic: String) {
+                if (isCurrentCall(session)) iceDiagnostics = diagnostic
+            }
+        })
+
     val signaling = remember {
-        var signalingRef: SupabaseCallSignaling? = null
-        val newSignaling = SupabaseCallSignaling(
-            deviceId = deviceId,
+        val newSignaling = AuthenticatedCallSignaling(
             supabaseUrl = BuildConfig.SUPABASE_URL,
             supabaseKey = BuildConfig.SUPABASE_PUBLISHABLE_KEY,
-            listener = object : SupabaseCallSignaling.Listener {
-                override fun onCallInvite(callId: String, fromDeviceId: String, toDeviceId: String) {
-                    if (currentCallId != null && currentCallId != callId) return
-                    callError = null
+            listener = object : AuthenticatedCallSignaling.Listener {
+                override fun onAuthenticatedCallSessionChanged(session: AuthenticatedCallSession) {
+                    val localUserId = signalingRef?.authenticatedUserId() ?: return
+                    if (session.status == AuthenticatedCallStatus.RINGING
+                        && session.calleeUserId == localUserId
+                        && currentCallId == null
+                    ) {
+                        currentCallId = session.callId.toString()
+                        activeCallSession = session
+                        callParticipantName = defaultCallParticipantName
+                        calleeAccepted = false
+                        callError = null
+                        screen = DemoScreen.IncomingCall
+                        authScope.launch {
+                            runCatching { signalingRef?.prepareCall(session) }
+                        }
+                        authScope.launch {
+                            val name = runCatching { signalingRef?.loadPublicDisplayName(session.callerUserId) }.getOrNull()
+                            if (currentCallId == session.callId.toString() && !name.isNullOrBlank()) callParticipantName = name
+                        }
+                    }
+                    if (currentCallId != session.callId.toString()) return
+                    activeCallSession = session
+                    if (session.status == AuthenticatedCallStatus.ACCEPTED && session.callerUserId == localUserId) {
+                        engine?.startOffer()
+                    }
+                    if (session.status.isTerminal) {
+                        currentCallId = null
+                        activeCallSession = null
+                        pendingRemoteOffer = null
+                        pendingRemoteIce = emptyList()
+                        engine?.dispose("call session ended")
+                        engine = null
+                        calleeAccepted = false
+                        callState = WebRtcCallState.IDLE
+                        callError = null
+                        screen = DemoScreen.Contacts
+                    }
+                }
+
+                override fun onAuthenticatedCallSessionLost() {
+                    currentCallId = null
+                    activeCallSession = null
+                    pendingRemoteOffer = null
+                    pendingRemoteIce = emptyList()
+                    engine?.dispose("authenticated session lost")
+                    engine = null
                     calleeAccepted = false
-                    currentCallId = callId
-                    peerDeviceId = fromDeviceId
-                    signalingRef?.prepareCall(callId)
-                    screen = DemoScreen.IncomingCall
+                    callState = WebRtcCallState.IDLE
+                    if (screen == DemoScreen.IncomingCall || screen == DemoScreen.ActiveCall) screen = DemoScreen.Contacts
                 }
 
-                override fun onCallAccepted(callId: String, fromDeviceId: String) {
-                    if (currentCallId != callId || peerDeviceId != fromDeviceId) return
-                    engine?.startOffer()
+                override fun onAuthenticatedCallError() {
+                    callError = context.getString(R.string.call_routing_error)
                 }
 
-                override fun onCallDeclined(callId: String, fromDeviceId: String) {
-                    if (currentCallId == callId && peerDeviceId == fromDeviceId) {
-                        currentCallId = null
-                        peerDeviceId = null
-                        pendingRemoteOffer = null
-                        pendingRemoteIce = emptyList()
-                        engine?.dispose("peer declined")
-                        engine = null
-                        callState = WebRtcCallState.IDLE
-                        callError = null
-                        screen = DemoScreen.Contacts
-                    }
-                }
-
-                override fun onCallEnded(callId: String, fromDeviceId: String) {
-                    if (currentCallId == callId && peerDeviceId == fromDeviceId) {
-                        currentCallId = null
-                        peerDeviceId = null
-                        pendingRemoteOffer = null
-                        pendingRemoteIce = emptyList()
-                        engine?.dispose("peer ended call")
-                        engine = null
-                        callState = WebRtcCallState.IDLE
-                        callError = null
-                        screen = DemoScreen.Contacts
-                    }
-                }
-
-                override fun onRemoteOffer(callId: String, fromDeviceId: String, sdp: String) {
-                    if (currentCallId != null && currentCallId != callId) return
-                    currentCallId = callId
-                    peerDeviceId = fromDeviceId
+                override fun onRemoteOffer(session: AuthenticatedCallSession, sdp: String) {
+                    if (currentCallId != session.callId.toString() || activeCallSession?.callerUserId != session.callerUserId
+                        || activeCallSession?.calleeUserId != session.calleeUserId
+                    ) return
                     if (screen != DemoScreen.ActiveCall) {
                         pendingRemoteOffer = sdp
-                        screen = DemoScreen.IncomingCall
                         return
                     }
-                    if (engine == null) {
-                        val incomingEngine = WebRtcAudioCallEngine(context.applicationContext, deviceId, callId, object : WebRtcAudioCallEngine.Listener {
-                            override fun onStateChanged(state: WebRtcCallState, error: String?) {
-                                callState = state
-                                callError = error
-                                if (state == WebRtcCallState.CONNECTED) signalingRef?.markConnected(callId)
-                            }
-
-                            override fun onLocalDescription(type: String, sdp: String) {
-                                if (type == "offer") {
-                                    signalingRef?.sendOffer(callId, fromDeviceId, sdp)
-                                } else if (type == "answer") {
-                                    signalingRef?.sendAnswer(callId, fromDeviceId, sdp)
-                                }
-                            }
-
-                            override fun onLocalIceCandidate(candidate: LocalIceCandidate) {
-                                signalingRef?.sendIceCandidate(callId, fromDeviceId, candidate)
-                            }
-
-                            override fun onIceDiagnosticsChanged(diagnostic: String) {
-                                iceDiagnostics = diagnostic
-                            }
-                        })
-                        engine = incomingEngine
-                        incomingEngine.prepareForRemoteOffer()
-                        incomingEngine.setMuted(isMuted)
-                        incomingEngine.setSpeakerEnabled(speakerEnabled)
-                        pendingRemoteIce.forEach(incomingEngine::addRemoteIceCandidate)
-                        pendingRemoteIce = emptyList()
-                    }
+                    val incomingEngine = engine ?: createCallEngine(session).also { engine = it }
+                    incomingEngine.prepareForRemoteOffer()
+                    incomingEngine.setMuted(isMuted)
+                    incomingEngine.setSpeakerEnabled(speakerEnabled)
+                    pendingRemoteIce.forEach(incomingEngine::addRemoteIceCandidate)
+                    pendingRemoteIce = emptyList()
                     pendingRemoteOffer = null
-                    engine?.applyRemoteOffer(sdp)
+                    incomingEngine.applyRemoteOffer(sdp)
                 }
 
-                override fun onRemoteAnswer(callId: String, fromDeviceId: String, sdp: String) {
-                    if (currentCallId != callId || peerDeviceId != fromDeviceId) return
+                override fun onRemoteAnswer(session: AuthenticatedCallSession, sdp: String) {
+                    if (!isCurrentCall(session)) return
                     engine?.applyRemoteAnswer(sdp)
                     screen = DemoScreen.ActiveCall
                 }
 
-                override fun onRemoteIceCandidate(callId: String, fromDeviceId: String, candidate: LocalIceCandidate) {
-                    if (currentCallId != callId || peerDeviceId != fromDeviceId) return
+                override fun onRemoteIceCandidate(session: AuthenticatedCallSession, candidate: LocalIceCandidate) {
+                    if (!isCurrentCall(session)) return
                     val activeEngine = engine
-                    if (activeEngine != null) {
-                        activeEngine.addRemoteIceCandidate(candidate)
-                    } else {
-                        pendingRemoteIce = pendingRemoteIce + candidate
-                    }
-                }
-
-                override fun onPeerPresenceChanged(peerDeviceId: String, online: Boolean) {
-                    val expectedPeer = if (deviceId == "pupsik-a") "pupsik-b" else "pupsik-a"
-                    if (peerDeviceId == expectedPeer) peerOnline = online
-                }
-
-                override fun onSignalError(message: String) {
-                    val updatedStatus = CallUiStatus(callState, callError).withSignalError(message)
-                    callState = updatedStatus.state
-                    callError = updatedStatus.error
+                    if (activeEngine != null) activeEngine.addRemoteIceCandidate(candidate)
+                    else pendingRemoteIce = pendingRemoteIce + candidate
                 }
             },
         )
-        signalingRef = newSignaling
-        signalingInstance = newSignaling
         newSignaling
     }
+    signalingRef = signaling
     val authController = remember(signaling) { SupabaseAuthController(signaling.authClient) }
     val authState by authController.state.collectAsState()
     val profileRepository = remember(signaling) { AuthenticatedProfileRepository(signaling.authClient) }
     val profileState by profileRepository.state.collectAsState()
+    val phoneVerificationController = remember(signaling) {
+        PhoneVerificationController(SupabasePhoneIdentityGateway(signaling.authClient))
+    }
+    val phoneVerificationState by phoneVerificationController.state.collectAsState()
+    val messagingRepository = remember(signaling) { MessagingRepository(SupabaseMessagingGateway(signaling.authClient)) }
+    val conversationListState by messagingRepository.conversationState.collectAsState()
+    val messageListState by messagingRepository.messageState.collectAsState()
+    val selectedConversation = (conversationListState as? ConversationListState.Loaded)
+        ?.conversations?.firstOrNull { it.id.toString() == selectedConversationId }
     val localizedAuthMessage = authState.message?.let { stringResource(it.stringResourceId()) }
-    val authScope = rememberCoroutineScope()
 
-    val startLocalCall = fun() {
-        val targetDevice = if (deviceId == "pupsik-a") "pupsik-b" else "pupsik-a"
-        val newCallId = UUID.randomUUID().toString()
-        if (engine != null) {
-            engine?.dispose("replaced by a new call")
-        }
-        val callEngine = WebRtcAudioCallEngine(context.applicationContext, deviceId, newCallId, object : WebRtcAudioCallEngine.Listener {
-            override fun onStateChanged(state: WebRtcCallState, error: String?) {
-                callState = state
-                callError = error
-                if (state == WebRtcCallState.CONNECTED) signaling.markConnected(newCallId)
+    val startAuthenticatedCall = fun(calleeUserId: UUID) {
+        authScope.launch {
+            try {
+                val requestedCallId = UUID.randomUUID()
+                val session = signaling.createCallSession(requestedCallId, calleeUserId)
+                val localUserId = signaling.authenticatedUserId()
+                if (localUserId == null || outgoingCallRoute(localUserId, calleeUserId, session) == null) return@launch
+                engine?.dispose("replaced by an authenticated call")
+                currentCallId = session.callId.toString()
+                activeCallSession = session
+                callParticipantName = defaultCallParticipantName
+                engine = createCallEngine(session)
+                engine?.setMuted(isMuted)
+                engine?.setSpeakerEnabled(speakerEnabled)
+                callState = WebRtcCallState.WAITING_FOR_REMOTE
+                screen = DemoScreen.ActiveCall
+                signaling.prepareCall(session)
+                signaling.ringCall(session)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                callError = context.getString(R.string.call_routing_error)
+                screen = DemoScreen.Calls
             }
-
-            override fun onLocalDescription(type: String, sdp: String) {
-                if (type == "offer") {
-                    signaling.sendOffer(newCallId, targetDevice, sdp)
-                } else if (type == "answer") {
-                    signaling.sendAnswer(newCallId, targetDevice, sdp)
-                }
-            }
-
-            override fun onLocalIceCandidate(candidate: LocalIceCandidate) {
-                signaling.sendIceCandidate(newCallId, targetDevice, candidate)
-            }
-
-            override fun onIceDiagnosticsChanged(diagnostic: String) {
-                iceDiagnostics = diagnostic
-            }
-        })
-        currentCallId = newCallId
-        peerDeviceId = targetDevice
-        engine = callEngine
-        callEngine.setMuted(isMuted)
-        callEngine.setSpeakerEnabled(speakerEnabled)
-        screen = DemoScreen.ActiveCall
-        signaling.startCall(newCallId, targetDevice)
-    }
-
-    val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        Log.i(PermissionLogTag, "deviceId=$deviceId microphonePermission=${if (granted) "granted" else "denied"} purpose=caller")
-        if (granted) {
-            callError = null
-            startLocalCall()
-        } else {
-            callState = WebRtcCallState.FAILED
-            callError = context.getString(R.string.microphone_permission_error)
-        }
-    }
-    val requestCall = fun() {
-        val granted = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-        Log.i(PermissionLogTag, "deviceId=$deviceId microphonePermission=${if (granted) "granted" else "not-granted"} purpose=caller")
-        if (granted) {
-            callError = null
-            startLocalCall()
-        } else {
-            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
     val rejectAnswerForPermission = fun() {
-        val activeCallId = currentCallId
-        val activePeer = peerDeviceId
-        if (activeCallId != null && activePeer != null) signaling.declineCall(activeCallId, activePeer)
+        val activeSession = activeCallSession
+        if (activeSession != null) authScope.launch { runCatching { signaling.declineCall(activeSession) } }
         engine?.dispose("callee microphone permission denied")
         engine = null
         currentCallId = null
-        peerDeviceId = null
+        activeCallSession = null
         pendingRemoteOffer = null
         pendingRemoteIce = emptyList()
         calleeAccepted = false
@@ -382,8 +357,9 @@ private fun PupsikCallApp() {
     }
 
     val completeAnswer = fun() {
-        val activeCallId = currentCallId ?: return
-        val activePeer = peerDeviceId ?: return
+        val activeSession = activeCallSession ?: return
+        val activeCallId = activeSession.callId.toString()
+        if (signaling.authenticatedUserId() != activeSession.calleeUserId) return
         val permissionGranted = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         Log.i(PermissionLogTag, "deviceId=$deviceId callId=$activeCallId microphonePermission=${if (permissionGranted) "granted" else "denied"} purpose=callee")
         if (!permissionGranted) {
@@ -392,37 +368,7 @@ private fun PupsikCallApp() {
         }
         callError = null
         if (engine == null) {
-            val incomingEngine = WebRtcAudioCallEngine(context.applicationContext, deviceId, activeCallId, object : WebRtcAudioCallEngine.Listener {
-                override fun onStateChanged(state: WebRtcCallState, error: String?) {
-                    callState = state
-                    callError = error
-                    if (state == WebRtcCallState.FAILED && !calleeAccepted && currentCallId == activeCallId) {
-                        signaling.declineCall(activeCallId, activePeer)
-                        currentCallId = null
-                        peerDeviceId = null
-                        pendingRemoteOffer = null
-                        pendingRemoteIce = emptyList()
-                        screen = DemoScreen.Contacts
-                    }
-                    if (state == WebRtcCallState.CONNECTED) signaling.markConnected(activeCallId)
-                }
-
-                override fun onLocalDescription(type: String, sdp: String) {
-                    if (type == "offer") {
-                        signaling.sendOffer(activeCallId, activePeer, sdp)
-                    } else if (type == "answer") {
-                        signaling.sendAnswer(activeCallId, activePeer, sdp)
-                    }
-                }
-
-                override fun onLocalIceCandidate(candidate: LocalIceCandidate) {
-                    signaling.sendIceCandidate(activeCallId, activePeer, candidate)
-                }
-
-                override fun onIceDiagnosticsChanged(diagnostic: String) {
-                    iceDiagnostics = diagnostic
-                }
-            })
+            val incomingEngine = createCallEngine(activeSession)
             engine = incomingEngine
             incomingEngine.setMuted(isMuted)
             incomingEngine.setSpeakerEnabled(speakerEnabled)
@@ -431,13 +377,22 @@ private fun PupsikCallApp() {
         }
         val activeEngine = engine ?: return
         activeEngine.prepareForRemoteOffer {
-            if (currentCallId != activeCallId || peerDeviceId != activePeer || engine !== activeEngine) return@prepareForRemoteOffer
-            callError = null
-            calleeAccepted = true
-            signaling.acceptCall(activeCallId, activePeer)
-            pendingRemoteOffer?.let(activeEngine::applyRemoteOffer)
-            screen = DemoScreen.ActiveCall
-            pendingRemoteOffer = null
+            authScope.launch {
+                if (currentCallId != activeCallId || activeCallSession?.callId != activeSession.callId || engine !== activeEngine) return@launch
+                try {
+                    signaling.prepareCall(activeSession)
+                    signaling.acceptCall(activeSession)
+                    calleeAccepted = true
+                    callError = null
+                    pendingRemoteOffer?.let(activeEngine::applyRemoteOffer)
+                    screen = DemoScreen.ActiveCall
+                    pendingRemoteOffer = null
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    callError = context.getString(R.string.call_routing_error)
+                }
+            }
         }
     }
 
@@ -462,13 +417,12 @@ private fun PupsikCallApp() {
     }
 
     val handleDecline = fun() {
-        val activeCallId = currentCallId ?: return
-        val activePeer = peerDeviceId ?: return
-        signaling.declineCall(activeCallId, activePeer)
+        val activeSession = activeCallSession ?: return
+        authScope.launch { runCatching { signaling.declineCall(activeSession) } }
         engine?.dispose("local decline")
         engine = null
         currentCallId = null
-        peerDeviceId = null
+        activeCallSession = null
         pendingRemoteOffer = null
         pendingRemoteIce = emptyList()
         calleeAccepted = false
@@ -477,14 +431,13 @@ private fun PupsikCallApp() {
     }
 
     val endCall = fun() {
-        val activeCallId = currentCallId ?: return
-        val activePeer = peerDeviceId ?: return
-        signaling.endCall(activeCallId, activePeer)
+        val activeSession = activeCallSession ?: return
+        authScope.launch { runCatching { signaling.finishCall(activeSession) } }
         val activeEngine = engine
         engine = null
         activeEngine?.endCall("local end call")
         currentCallId = null
-        peerDeviceId = null
+        activeCallSession = null
         pendingRemoteOffer = null
         pendingRemoteIce = emptyList()
         calleeAccepted = false
@@ -509,6 +462,29 @@ private fun PupsikCallApp() {
 
     DisposableEffect(profileRepository) {
         onDispose { profileRepository.close() }
+    }
+
+    DisposableEffect(messagingRepository) {
+        onDispose { messagingRepository.close() }
+    }
+
+    LaunchedEffect(authState.phase, screen) {
+        if (authState.phase == AuthPhase.AUTHENTICATED && screen == DemoScreen.Messages) {
+            messagingRepository.loadConversations()
+        }
+    }
+
+    LaunchedEffect(authState.phase, screen, selectedConversationId) {
+        val conversationId = selectedConversationId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        if (authState.phase == AuthPhase.AUTHENTICATED && screen == DemoScreen.Conversation && conversationId != null) {
+            try {
+                messagingRepository.startObservingMessages(conversationId)
+                messagingRepository.loadMessages(conversationId)
+                awaitCancellation()
+            } finally {
+                messagingRepository.stopObservingMessages()
+            }
+        }
     }
 
     LaunchedEffect(authState.phase) {
@@ -568,34 +544,62 @@ private fun PupsikCallApp() {
                 )
                 else -> when (screen) {
                     DemoScreen.SignIn, DemoScreen.Contacts -> PupsikContactsScreen(
-                        peerName = peerName,
-                        online = peerOnline,
-                        errorMessage = localizedAuthMessage ?: callError.takeIf { BuildConfig.DEBUG },
-                        onCall = requestCall,
+                        profileName = (profileState as? AuthenticatedProfileState.Profile)
+                            ?.profile?.displayName.orEmpty(),
                         onOpenCalls = { screen = DemoScreen.Calls },
                         onOpenMessages = { screen = DemoScreen.Messages },
                         onOpenSettings = { screen = DemoScreen.Settings },
                         onOpenProfile = { screen = DemoScreen.Profile },
                     )
                     DemoScreen.Calls -> PupsikCallsScreen(
-                        peerName = peerName,
-                        online = peerOnline,
-                        onCall = requestCall,
                         onOpenContacts = { screen = DemoScreen.Contacts },
                         onOpenMessages = { screen = DemoScreen.Messages },
                     )
                     DemoScreen.Messages -> PupsikMessagesScreen(
-                        peerName = peerName,
-                        online = peerOnline,
-                        onOpenConversation = { screen = DemoScreen.Conversation },
+                        state = conversationListState,
+                        onRetry = { authScope.launch { messagingRepository.loadConversations() } },
+                        onLoadMore = {
+                            val cursor = (conversationListState as? ConversationListState.Loaded)?.nextCursor
+                            if (cursor != null) authScope.launch { messagingRepository.loadConversations(cursor) }
+                        },
+                        onOpenConversation = { conversation ->
+                            selectedConversationId = conversation.id.toString()
+                            screen = DemoScreen.Conversation
+                        },
                         onOpenContacts = { screen = DemoScreen.Contacts },
                         onOpenCalls = { screen = DemoScreen.Calls },
                     )
-                    DemoScreen.Conversation -> PupsikConversationScreen(
-                        peerName = peerName,
-                        online = peerOnline,
-                        onBack = { screen = DemoScreen.Messages },
-                        onCall = requestCall,
+                    DemoScreen.Conversation -> selectedConversation?.let { conversation ->
+                        PupsikConversationScreen(
+                            conversation = conversation,
+                            state = messageListState,
+                            onBack = { screen = DemoScreen.Messages },
+                            onRetry = { authScope.launch { messagingRepository.loadMessages(conversation.id) } },
+                            onRetryRealtime = {
+                                messagingRepository.startObservingMessages(conversation.id)
+                                authScope.launch { messagingRepository.loadMessages(conversation.id) }
+                            },
+                            onLoadOlder = {
+                                val cursor = (messageListState as? MessageListState.Loaded)?.nextCursor
+                                if (cursor != null) authScope.launch { messagingRepository.loadMessages(conversation.id, cursor) }
+                            },
+                            onSend = { conversationId, clientMessageId, body ->
+                                messagingRepository.sendTextMessage(conversationId, clientMessageId, body)
+                            },
+                        )
+                    } ?: PupsikMessagesScreen(
+                        state = conversationListState,
+                        onRetry = { authScope.launch { messagingRepository.loadConversations() } },
+                        onLoadMore = {
+                            val cursor = (conversationListState as? ConversationListState.Loaded)?.nextCursor
+                            if (cursor != null) authScope.launch { messagingRepository.loadConversations(cursor) }
+                        },
+                        onOpenConversation = { conversation ->
+                            selectedConversationId = conversation.id.toString()
+                            screen = DemoScreen.Conversation
+                        },
+                        onOpenContacts = { screen = DemoScreen.Contacts },
+                        onOpenCalls = { screen = DemoScreen.Calls },
                     )
                     DemoScreen.Settings -> PupsikSettingsScreen(
                         appearance = appearanceMode,
@@ -609,19 +613,24 @@ private fun PupsikCallApp() {
                     )
                     DemoScreen.Profile -> PupsikProfileScreen(
                         state = profileState,
+                        phoneState = phoneVerificationState,
                         onBack = { screen = DemoScreen.Settings },
                         onLogout = { authScope.launch { authController.logout() } },
                         onRetry = profileRepository::reload,
                         onSaveDisplayName = { name -> profileRepository.updateDisplayName(name) },
+                        onLoadPhone = phoneVerificationController::load,
+                        onRequestPhone = phoneVerificationController::requestVerification,
+                        onResendPhone = phoneVerificationController::resendVerification,
+                        onVerifyPhone = phoneVerificationController::verify,
                     )
                     DemoScreen.IncomingCall -> PupsikIncomingCallScreen(
-                        peerName = peerName,
+                        peerName = callParticipantName.ifBlank { defaultCallParticipantName },
                         errorMessage = callError.takeIf { BuildConfig.DEBUG },
                         onDecline = handleDecline,
                         onAnswer = handleAnswer,
                     )
                     DemoScreen.ActiveCall -> PupsikActiveCallScreen(
-                        peerName = peerName,
+                        peerName = callParticipantName.ifBlank { defaultCallParticipantName },
                         isMuted = isMuted,
                         speakerEnabled = speakerEnabled,
                         callState = callState,
@@ -844,93 +853,6 @@ private fun BrandMark() {
                 size = androidx.compose.ui.geometry.Size(size.width - 8.dp.toPx(), size.height - 8.dp.toPx()),
                 style = stroke,
             )
-        }
-    }
-}
-
-@Composable
-private fun ContactsScreen(
-    deviceId: String,
-    peerOnline: Boolean,
-    errorMessage: String?,
-    loggingOut: Boolean,
-    onCall: () -> Unit,
-    onLogout: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 23.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(68.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.contacts), color = MainText, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                TextButton(enabled = !loggingOut, onClick = onLogout) {
-                    Text(stringResource(if (loggingOut) R.string.signing_out else R.string.log_out), color = SecondaryText, fontSize = 12.sp)
-                }
-                IconButton(onClick = {}, modifier = Modifier.size(48.dp)) {
-                    PersonAddGlyph()
-                }
-            }
-        }
-        if (errorMessage != null) {
-            Text(errorMessage, color = DeclineRed, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
-        }
-        Spacer(Modifier.height(11.dp))
-        val peerName = stringResource(if (deviceId == "pupsik-a") R.string.peer_b else R.string.peer_a)
-        ContactRow("P", peerName, stringResource(if (peerOnline) R.string.online else R.string.offline), peerOnline, onCall)
-        Spacer(Modifier.weight(1f))
-        BottomNavigationBar()
-    }
-}
-
-@Composable
-private fun PersonAddGlyph() {
-    val backgroundColor = AppBackground
-    val glyphColor = MainText
-    Box(Modifier.size(27.dp)) {
-        Icon(Icons.Filled.Person, contentDescription = stringResource(R.string.add_contact), tint = MainText, modifier = Modifier.align(Alignment.CenterStart).size(24.dp))
-        Canvas(Modifier.align(Alignment.BottomEnd).size(12.dp)) {
-            drawCircle(backgroundColor)
-            val strokeWidth = 1.7.dp.toPx()
-            drawLine(glyphColor, Offset(size.width * 0.5f, size.height * 0.18f), Offset(size.width * 0.5f, size.height * 0.82f), strokeWidth, cap = StrokeCap.Round)
-            drawLine(glyphColor, Offset(size.width * 0.18f, size.height * 0.5f), Offset(size.width * 0.82f, size.height * 0.5f), strokeWidth, cap = StrokeCap.Round)
-        }
-    }
-}
-
-@Composable
-private fun ContactRow(
-    initial: String,
-    name: String,
-    status: String,
-    online: Boolean,
-    onCall: () -> Unit,
-) {
-    val palette = LocalPupsikPalette.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(82.dp)
-            .clip(PupsikShapes.panel)
-            .padding(horizontal = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ProfileAvatar(initial, 55.dp, online)
-        Column(modifier = Modifier.weight(1f).padding(start = 14.dp), verticalArrangement = Arrangement.Center) {
-            Text(name, color = MainText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(7.dp).clip(CircleShape).background(if (online) OnlineGreen else palette.subtle))
-                Spacer(Modifier.size(6.dp))
-                Text(status, color = if (online) OnlineGreen else SecondaryText, fontSize = 12.sp)
-            }
-        }
-        IconButton(
-            onClick = onCall,
-            modifier = Modifier.size(48.dp).clip(CircleShape).background(OnlineGreen),
-        ) {
-            Icon(Icons.Filled.Call, contentDescription = stringResource(R.string.call_contact, name), tint = Color.White, modifier = Modifier.size(22.dp))
         }
     }
 }

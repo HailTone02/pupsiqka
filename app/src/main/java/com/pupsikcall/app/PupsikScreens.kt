@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
@@ -81,52 +83,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @Composable
-internal fun PupsikContactsScreen(
-    peerName: String,
-    online: Boolean,
-    errorMessage: String?,
-    onCall: () -> Unit,
-    onOpenCalls: () -> Unit,
-    onOpenMessages: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenProfile: () -> Unit,
-) {
-    val palette = LocalPupsikPalette.current
-    Column(Modifier.fillMaxSize().background(palette.background)) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = PupsikSpacing.large, vertical = PupsikSpacing.medium),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column {
-                Text(stringResource(R.string.contacts), style = MaterialTheme.typography.headlineLarge, color = palette.text)
-                Text("${if (online) stringResource(R.string.online) else stringResource(R.string.offline)}", style = MaterialTheme.typography.bodyMedium, color = if (online) palette.online else palette.muted)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onOpenSettings) {
-                    Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings), tint = palette.muted)
-                }
-                IconButton(onClick = onOpenProfile) {
-                    PupsikAvatar(peerName.take(1), 38.dp)
-                }
-            }
-        }
-        if (errorMessage != null) {
-            Text(errorMessage, color = palette.danger, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = PupsikSpacing.large, end = PupsikSpacing.large, bottom = PupsikSpacing.small))
-        }
-        Column(Modifier.weight(1f).padding(horizontal = PupsikSpacing.large)) {
-            Text(stringResource(R.string.recent), style = MaterialTheme.typography.labelLarge, color = palette.muted, modifier = Modifier.padding(vertical = PupsikSpacing.medium))
-            PupsikContactRow(peerName, online, onCall, onOpenMessages)
-        }
-        PupsikBottomNavigation("contacts", {}, onOpenCalls, onOpenMessages)
-    }
-}
-
-@Composable
 internal fun PupsikCallsScreen(
-    peerName: String,
-    online: Boolean,
-    onCall: () -> Unit,
     onOpenContacts: () -> Unit,
     onOpenMessages: () -> Unit,
 ) {
@@ -145,114 +102,12 @@ internal fun PupsikCallsScreen(
                     .padding(PupsikSpacing.large),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                PupsikAvatar(peerName.take(1), 88.dp)
+                Icon(Icons.Filled.Call, contentDescription = null, tint = palette.muted, modifier = Modifier.size(44.dp))
                 Spacer(Modifier.height(PupsikSpacing.medium))
                 Text(stringResource(R.string.no_recent_calls), color = palette.text, style = MaterialTheme.typography.titleLarge)
-                Text(if (online) stringResource(R.string.online) else stringResource(R.string.offline), color = palette.muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = PupsikSpacing.xSmall))
-                Spacer(Modifier.height(PupsikSpacing.large))
-                BronzeButton(stringResource(R.string.call_now), onCall, Modifier.fillMaxWidth(0.7f))
             }
         }
         PupsikBottomNavigation("calls", onOpenContacts, {}, onOpenMessages)
-    }
-}
-
-@Composable
-internal fun PupsikMessagesScreen(
-    peerName: String,
-    online: Boolean,
-    onOpenConversation: () -> Unit,
-    onOpenContacts: () -> Unit,
-    onOpenCalls: () -> Unit,
-) {
-    val palette = LocalPupsikPalette.current
-    val lightUi = palette == PupsikPalettes.Light
-    Column(Modifier.fillMaxSize().background(palette.background)) {
-        ScreenHeader(stringResource(R.string.messages))
-        Row(
-            Modifier.fillMaxWidth()
-                .padding(horizontal = if (lightUi) PupsikSpacing.medium else 0.dp)
-                .clip(PupsikShapes.panel)
-                .background(if (lightUi) palette.surfaceRaised else Color.Transparent)
-                .then(if (lightUi) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.panel) else Modifier)
-                .clickable(onClick = onOpenConversation)
-                .padding(horizontal = PupsikSpacing.medium, vertical = PupsikSpacing.medium),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            PupsikAvatar(peerName.take(1), if (lightUi) 54.dp else 58.dp)
-            Column(Modifier.weight(1f).padding(start = PupsikSpacing.medium)) {
-                Text(peerName, color = palette.text, style = MaterialTheme.typography.titleMedium)
-                Text(if (online) stringResource(R.string.online) else stringResource(R.string.start_conversation), color = palette.muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = PupsikSpacing.xSmall))
-            }
-            Icon(Icons.Filled.Email, contentDescription = stringResource(R.string.messages), tint = palette.bronze)
-        }
-        Spacer(Modifier.weight(1f))
-        PupsikBottomNavigation("messages", onOpenContacts, onOpenCalls, {})
-    }
-}
-
-@Composable
-internal fun PupsikConversationScreen(
-    peerName: String,
-    online: Boolean,
-    onBack: () -> Unit,
-    onCall: () -> Unit,
-) {
-    val palette = LocalPupsikPalette.current
-    val sentMessages = remember { mutableStateListOf<String>() }
-    var draft by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().background(palette.background)) {
-        Row(
-            Modifier.fillMaxWidth().height(64.dp).padding(horizontal = PupsikSpacing.small),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back), tint = palette.text) }
-            PupsikAvatar(peerName.take(1), 40.dp)
-            Column(Modifier.weight(1f).padding(start = PupsikSpacing.small)) {
-                Text(peerName, color = palette.text, style = MaterialTheme.typography.titleMedium)
-                Text(if (online) stringResource(R.string.online) else stringResource(R.string.offline), color = if (online) palette.online else palette.muted, style = MaterialTheme.typography.bodyMedium)
-            }
-            IconButton(onClick = onCall) { Icon(Icons.Filled.Call, contentDescription = stringResource(R.string.call_contact, peerName), tint = palette.bronze) }
-        }
-        Column(
-            Modifier.weight(1f).fillMaxWidth().padding(PupsikSpacing.large),
-            verticalArrangement = if (sentMessages.isEmpty()) Arrangement.Center else Arrangement.Bottom,
-            horizontalAlignment = if (sentMessages.isEmpty()) Alignment.CenterHorizontally else Alignment.End,
-        ) {
-            if (sentMessages.isEmpty()) {
-                Text(stringResource(R.string.no_messages), color = palette.muted, style = MaterialTheme.typography.bodyMedium)
-            }
-            sentMessages.forEach { message ->
-                Text(
-                    message,
-                    color = palette.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(vertical = PupsikSpacing.xSmall).clip(PupsikShapes.panel)
-                        .background(if (palette == PupsikPalettes.Light) palette.surfaceRaised else palette.surface)
-                        .then(if (palette == PupsikPalettes.Light) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.panel) else Modifier)
-                        .padding(horizontal = PupsikSpacing.medium, vertical = PupsikSpacing.small),
-                )
-            }
-        }
-        Row(
-            Modifier.fillMaxWidth().imePadding().padding(horizontal = PupsikSpacing.medium, vertical = PupsikSpacing.small),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text(stringResource(R.string.message_hint)) },
-                shape = PupsikShapes.capsule,
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { if (draft.isNotBlank()) { sentMessages.add(draft.trim()); draft = "" } }),
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = palette.bronze, unfocusedBorderColor = palette.outline, focusedTextColor = palette.text, unfocusedTextColor = palette.text, cursorColor = palette.bronze),
-            )
-            TextButton(onClick = { if (draft.isNotBlank()) { sentMessages.add(draft.trim()); draft = "" } }) {
-                Text(stringResource(R.string.send_message), color = palette.bronze, fontSize = 12.sp)
-            }
-        }
     }
 }
 
@@ -341,10 +196,15 @@ internal fun PupsikSettingsScreen(
 @Composable
 internal fun PupsikProfileScreen(
     state: AuthenticatedProfileState,
+    phoneState: PhoneVerificationState,
     onBack: () -> Unit,
     onLogout: () -> Unit,
     onRetry: () -> Unit,
     onSaveDisplayName: suspend (String) -> ProfileUpdateResult,
+    onLoadPhone: suspend () -> Unit,
+    onRequestPhone: suspend (String) -> Unit,
+    onResendPhone: suspend () -> Unit,
+    onVerifyPhone: suspend (String) -> Unit,
 ) {
     val palette = LocalPupsikPalette.current
     val scope = rememberCoroutineScope()
@@ -355,6 +215,9 @@ internal fun PupsikProfileScreen(
     val email = (state as? AuthenticatedProfileState.Profile)?.email
     LaunchedEffect(profile?.userId, profile?.displayName) {
         if (profile != null) displayName = profile.displayName.orEmpty()
+    }
+    LaunchedEffect(profile?.userId) {
+        if (profile != null) onLoadPhone()
     }
     Column(Modifier.fillMaxSize().background(palette.background)) {
         Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -382,7 +245,7 @@ internal fun PupsikProfileScreen(
                 onAction = onRetry,
             )
             is AuthenticatedProfileState.Profile -> Column(
-                Modifier.fillMaxWidth().weight(1f).padding(horizontal = PupsikSpacing.large),
+                Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = PupsikSpacing.large),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Spacer(Modifier.height(PupsikSpacing.section))
@@ -437,7 +300,14 @@ internal fun PupsikProfileScreen(
                 if (email != null) {
                     ProfileDetail(stringResource(R.string.account), email)
                 }
-                Spacer(Modifier.weight(1f))
+                PhoneVerificationSection(
+                    state = phoneState,
+                    onLoad = onLoadPhone,
+                    onRequest = onRequestPhone,
+                    onResend = onResendPhone,
+                    onVerify = onVerifyPhone,
+                )
+                Spacer(Modifier.height(PupsikSpacing.large))
                 TextButton(onClick = onLogout, modifier = Modifier.padding(bottom = PupsikSpacing.large)) { Text(stringResource(R.string.sign_out), color = palette.danger) }
             }
         }
@@ -674,28 +544,7 @@ private fun PupsikAvatar(initial: String, size: androidx.compose.ui.unit.Dp, mod
 }
 
 @Composable
-private fun PupsikContactRow(name: String, online: Boolean, onCall: () -> Unit, onMessage: () -> Unit) {
-    val palette = LocalPupsikPalette.current
-    val lightUi = palette == PupsikPalettes.Light
-    Row(
-        Modifier.fillMaxWidth().clip(PupsikShapes.panel).background(palette.surfaceRaised)
-            .then(if (lightUi) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.panel) else Modifier)
-            .clickable(onClick = onMessage).padding(PupsikSpacing.medium),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        PupsikAvatar(name.take(1), 58.dp)
-        Column(Modifier.weight(1f).padding(start = PupsikSpacing.medium)) {
-            Text(name, color = palette.text, style = MaterialTheme.typography.titleMedium)
-            Text(if (online) stringResource(R.string.online) else stringResource(R.string.offline), color = if (online) palette.online else palette.muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = PupsikSpacing.xSmall))
-        }
-        IconButton(onClick = onCall, modifier = Modifier.clip(CircleShape).background(palette.bronze)) {
-            Icon(Icons.Filled.Call, contentDescription = stringResource(R.string.call_contact, name), tint = Color.White)
-        }
-    }
-}
-
-@Composable
-private fun PupsikBottomNavigation(selected: String, onContacts: () -> Unit, onCalls: () -> Unit, onMessages: () -> Unit) {
+internal fun PupsikBottomNavigation(selected: String, onContacts: () -> Unit, onCalls: () -> Unit, onMessages: () -> Unit) {
     val palette = LocalPupsikPalette.current
     val lightUi = palette == PupsikPalettes.Light
     Row(
@@ -731,7 +580,7 @@ private fun BottomNavigationItem(label: String, key: String, selected: String, o
 }
 
 @Composable
-private fun ScreenHeader(title: String) {
+internal fun ScreenHeader(title: String) {
     val palette = LocalPupsikPalette.current
     val lightUi = palette == PupsikPalettes.Light
     Text(title, color = palette.text, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(horizontal = PupsikSpacing.large, vertical = if (lightUi) 20.dp else PupsikSpacing.medium))
