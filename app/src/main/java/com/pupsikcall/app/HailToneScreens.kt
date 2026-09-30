@@ -93,6 +93,7 @@ internal fun HailToneCallsScreen(
     onLoadMore: () -> Unit,
     onOpenContacts: () -> Unit,
     onOpenMessages: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val palette = LocalHailTonePalette.current
     Column(Modifier.fillMaxSize().background(palette.background)) {
@@ -139,7 +140,7 @@ internal fun HailToneCallsScreen(
                 }
             }
         }
-        HailToneBottomNavigation("calls", onOpenContacts, {}, onOpenMessages)
+        HailToneBottomNavigation("calls", onOpenContacts, {}, onOpenMessages, onOpenSettings)
     }
 }
 
@@ -163,7 +164,7 @@ private fun CallHistoryRow(call: CallHistoryRecord) {
         ?: call.counterpartUserId.toString()
     Row(
         Modifier.fillMaxWidth().clip(HailToneShapes.panel).background(palette.surfaceRaised)
-            .then(if (palette == HailTonePalettes.Light) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.panel) else Modifier)
+            .border(1.dp, palette.outline, HailToneShapes.panel)
             .padding(HailToneSpacing.medium),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -204,7 +205,6 @@ private fun formatCallDuration(durationSeconds: Long): String {
 internal fun HailToneSettingsScreen(
     settingsState: AppSettingsState,
     profileState: AuthenticatedProfileState,
-    onAppearanceChange: (AppearanceMode) -> Unit,
     onAutoAnswerEnabledChange: (Boolean) -> Unit,
     onAutoAnswerDelayChange: (AutoAnswerDelay) -> Unit,
     onRemoveTrustedUser: (java.util.UUID) -> Unit,
@@ -214,44 +214,20 @@ internal fun HailToneSettingsScreen(
     languageNames: List<String>,
     selectedLanguageIndex: Int,
     onLanguageSelected: (String) -> Unit,
+    onOpenContacts: () -> Unit,
+    onOpenCalls: () -> Unit,
+    onOpenMessages: () -> Unit,
     onOpenProfile: () -> Unit,
     onLogout: () -> Unit,
 ) {
     val palette = LocalHailTonePalette.current
     val lightUi = palette == HailTonePalettes.Light
-    val settings = (settingsState as? AppSettingsState.Ready)?.settings
-    val appearance = settings?.appearance ?: AppearanceMode.SYSTEM
     val accountProfile = profileState as? AuthenticatedProfileState.Profile
     Column(Modifier.fillMaxSize().background(palette.background)) {
         ScreenHeader(stringResource(R.string.settings))
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = HailToneSpacing.large),
         ) {
-            Text(stringResource(R.string.appearance), color = palette.text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = HailToneSpacing.large, bottom = HailToneSpacing.medium))
-            Row(
-                Modifier.fillMaxWidth().clip(HailToneShapes.control).background(palette.surface)
-                    .then(if (lightUi) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.control) else Modifier)
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                listOf(AppearanceMode.SYSTEM, AppearanceMode.LIGHT, AppearanceMode.DARK).forEach { mode ->
-                    val label = when (mode) {
-                        AppearanceMode.SYSTEM -> stringResource(R.string.appearance_system)
-                        AppearanceMode.LIGHT -> stringResource(R.string.appearance_light)
-                        AppearanceMode.DARK -> stringResource(R.string.appearance_dark)
-                    }
-                    val selected = mode == appearance
-                    Text(
-                        text = label,
-                        color = if (selected && lightUi) Color.White else if (selected) palette.text else palette.muted,
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.weight(1f).clip(HailToneShapes.control)
-                            .background(if (selected && lightUi) palette.bronze else if (selected) palette.surfaceRaised else Color.Transparent)
-                            .clickable { onAppearanceChange(mode) }.padding(vertical = 12.dp),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    )
-                }
-            }
             Text(
                 stringResource(R.string.call_settings),
                 color = palette.text,
@@ -264,7 +240,9 @@ internal fun HailToneSettingsScreen(
                 is AppSettingsState.Ready -> {
                     val currentSettings = settingsState.settings
                     Row(
-                        Modifier.fillMaxWidth().padding(vertical = HailToneSpacing.small),
+                        Modifier.fillMaxWidth().clip(HailToneShapes.panel).background(palette.surface)
+                            .border(1.dp, palette.outline, HailToneShapes.panel)
+                            .padding(horizontal = HailToneSpacing.medium, vertical = HailToneSpacing.small),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
@@ -282,7 +260,7 @@ internal fun HailToneSettingsScreen(
                     )
                     Row(
                         Modifier.fillMaxWidth().clip(HailToneShapes.control).background(palette.surface)
-                            .then(if (lightUi) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.control) else Modifier)
+                            .border(1.dp, palette.outline, HailToneShapes.control)
                             .padding(4.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
@@ -298,7 +276,7 @@ internal fun HailToneSettingsScreen(
                                 color = if (selected && lightUi) Color.White else if (selected) palette.text else palette.muted,
                                 style = MaterialTheme.typography.labelLarge,
                                 modifier = Modifier.weight(1f).clip(HailToneShapes.control)
-                                    .background(if (selected && lightUi) palette.bronze else if (selected) palette.surfaceRaised else Color.Transparent)
+                                    .background(if (selected) palette.glow else Color.Transparent)
                                     .clickable { onAutoAnswerDelayChange(delay) }.padding(vertical = 12.dp),
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                             )
@@ -322,7 +300,9 @@ internal fun HailToneSettingsScreen(
                     verifiedContacts.forEach { contact ->
                         val userId = contact.account.userId
                         Row(
-                            Modifier.fillMaxWidth().padding(vertical = HailToneSpacing.xSmall),
+                            Modifier.fillMaxWidth().clip(HailToneShapes.control).background(palette.surface)
+                                .border(1.dp, palette.outline, HailToneShapes.control)
+                                .padding(horizontal = HailToneSpacing.medium, vertical = HailToneSpacing.xSmall),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(userId.toString(), color = palette.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
@@ -338,7 +318,9 @@ internal fun HailToneSettingsScreen(
                         .sortedBy(java.util.UUID::toString)
                         .forEach { userId ->
                             Row(
-                                Modifier.fillMaxWidth().padding(vertical = HailToneSpacing.xSmall),
+                                Modifier.fillMaxWidth().clip(HailToneShapes.control).background(palette.surface)
+                                    .border(1.dp, palette.outline, HailToneShapes.control)
+                                    .padding(horizontal = HailToneSpacing.medium, vertical = HailToneSpacing.xSmall),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(userId.toString(), color = palette.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
@@ -362,8 +344,8 @@ internal fun HailToneSettingsScreen(
             Box {
                 Row(
                     Modifier.fillMaxWidth().clip(HailToneShapes.control)
-                        .background(if (lightUi) palette.surfaceRaised else palette.surface)
-                        .then(if (lightUi) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.control) else Modifier)
+                        .background(palette.surface)
+                        .border(1.dp, palette.outline, HailToneShapes.control)
                         .clickable { languagesExpanded = true }.padding(HailToneSpacing.medium),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
@@ -399,9 +381,10 @@ internal fun HailToneSettingsScreen(
             accountProfile?.email?.let { Text(it, color = palette.muted, style = MaterialTheme.typography.bodySmall) }
             Row(
                 Modifier.fillMaxWidth()
-                    .then(if (lightUi) Modifier.clip(HailToneShapes.control).background(palette.surfaceRaised).border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.control) else Modifier)
+                    .clip(HailToneShapes.control).background(palette.surface)
+                    .border(1.dp, palette.outline, HailToneShapes.control)
                     .clickable(onClick = onOpenProfile)
-                    .padding(horizontal = if (lightUi) HailToneSpacing.medium else 0.dp, vertical = HailToneSpacing.medium),
+                    .padding(horizontal = HailToneSpacing.medium, vertical = HailToneSpacing.medium),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Filled.Person, contentDescription = null, tint = palette.bronze)
@@ -409,6 +392,7 @@ internal fun HailToneSettingsScreen(
             }
             TextButton(onClick = onLogout) { Text(stringResource(R.string.sign_out), color = palette.danger) }
         }
+        HailToneBottomNavigation("settings", onOpenContacts, onOpenCalls, onOpenMessages, {})
     }
 }
 
@@ -687,7 +671,7 @@ internal fun HailToneActiveCallScreen(
                 WebRtcCallState.FAILED -> RuntimeDiagnostic.failureDisplayText(BuildConfig.DEBUG, stringResource(R.string.call_state_failed), errorMessage)
                 else -> callStateText(callState)
             }
-            Text(status, color = if (callState == WebRtcCallState.CONNECTED) palette.caramel else palette.muted, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = HailToneSpacing.small))
+            Text(status, color = if (callState == WebRtcCallState.CONNECTED) palette.online else palette.muted, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = HailToneSpacing.small))
             if (errorMessage != null) Text(errorMessage, color = palette.danger, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = HailToneSpacing.small))
             if (BuildConfig.DEBUG && iceDiagnostics.isNotBlank()) Text(iceDiagnostics, color = palette.muted, fontSize = 10.sp, modifier = Modifier.padding(top = HailToneSpacing.small))
             Spacer(Modifier.height(HailToneSpacing.large))
@@ -712,8 +696,6 @@ internal fun HailToneActiveCallScreen(
 private fun CallBackdrop(peerName: String, content: @Composable () -> Unit) {
     val palette = LocalHailTonePalette.current
     Box(Modifier.fillMaxSize().background(palette.background)) {
-        HailToneAvatar(peerName.take(1), 300.dp, Modifier.align(Alignment.Center).blur(46.dp).scale(1.2f))
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(palette.background.copy(alpha = 0.54f), palette.background.copy(alpha = 0.88f), palette.background))))
         content()
     }
 }
@@ -721,20 +703,12 @@ private fun CallBackdrop(peerName: String, content: @Composable () -> Unit) {
 @Composable
 private fun OrbitalAvatar(peerName: String) {
     val palette = LocalHailTonePalette.current
-    val motion = rememberInfiniteTransition(label = "avatar-orbit")
-    val rotation by motion.animateFloat(0f, 360f, infiniteRepeatable(tween(14000), RepeatMode.Restart), label = "orbit-rotation")
-    val pulse by motion.animateFloat(0.94f, 1.04f, infiniteRepeatable(tween(1700), RepeatMode.Reverse), label = "avatar-pulse")
-    Box(Modifier.size(226.dp), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize().rotate(rotation)) {
-            drawCircle(palette.bronze.copy(alpha = 0.22f), style = Stroke(width = 1.dp.toPx()))
-            drawArc(palette.caramel, -52f, 96f, false, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
-            drawCircle(palette.glow, radius = 4.dp.toPx(), center = Offset(size.width * 0.86f, size.height * 0.32f))
+    Box(Modifier.size(188.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            drawCircle(palette.glow, style = Stroke(width = 1.dp.toPx()))
+            drawArc(palette.bronze, -52f, 96f, false, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
         }
-        Canvas(Modifier.size(194.dp).rotate(-rotation * 0.62f)) {
-            drawCircle(palette.caramel.copy(alpha = 0.28f), style = Stroke(width = 1.dp.toPx()))
-            drawArc(palette.glow.copy(alpha = 0.9f), 132f, 62f, false, style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round))
-        }
-        HailToneAvatar(peerName.take(1), 154.dp, Modifier.scale(pulse))
+        HailToneAvatar(peerName.take(1), 148.dp)
     }
 }
 
@@ -839,35 +813,36 @@ private fun HailToneAvatar(initial: String, size: androidx.compose.ui.unit.Dp, m
 }
 
 @Composable
-internal fun HailToneBottomNavigation(selected: String, onContacts: () -> Unit, onCalls: () -> Unit, onMessages: () -> Unit) {
+internal fun HailToneBottomNavigation(
+    selected: String,
+    onContacts: () -> Unit,
+    onCalls: () -> Unit,
+    onMessages: () -> Unit,
+    onSettings: () -> Unit,
+) {
     val palette = LocalHailTonePalette.current
-    val lightUi = palette == HailTonePalettes.Light
     Row(
-        if (lightUi) {
-            Modifier.fillMaxWidth().padding(horizontal = HailToneSpacing.medium, vertical = HailToneSpacing.small)
-                .height(68.dp).clip(HailToneShapes.panel).background(palette.surfaceRaised)
-                .border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.panel).padding(horizontal = 12.dp)
-        } else {
-            Modifier.fillMaxWidth().height(72.dp).background(palette.surface).padding(horizontal = HailToneSpacing.medium)
-        },
+        Modifier.fillMaxWidth().padding(horizontal = HailToneSpacing.medium, vertical = HailToneSpacing.small)
+            .height(68.dp).clip(HailToneShapes.panel).background(palette.surface)
+            .border(1.dp, palette.outline, HailToneShapes.panel).padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceAround,
     ) {
         BottomNavigationItem(stringResource(R.string.contacts), "contacts", selected, onContacts) { Icon(Icons.Filled.Person, contentDescription = null) }
         BottomNavigationItem(stringResource(R.string.calls), "calls", selected, onCalls) { Icon(Icons.Filled.Call, contentDescription = null) }
         BottomNavigationItem(stringResource(R.string.messages), "messages", selected, onMessages) { Icon(Icons.Filled.Email, contentDescription = null) }
+        BottomNavigationItem(stringResource(R.string.settings), "settings", selected, onSettings) { Icon(Icons.Filled.Settings, contentDescription = null) }
     }
 }
 
 @Composable
 private fun BottomNavigationItem(label: String, key: String, selected: String, onClick: () -> Unit, icon: @Composable () -> Unit) {
     val palette = LocalHailTonePalette.current
-    val lightUi = palette == HailTonePalettes.Light
     val tint = if (key == selected) palette.bronze else palette.muted
-    Column(Modifier.clip(HailToneShapes.control).clickable(onClick = onClick).padding(horizontal = if (lightUi) 14.dp else HailToneSpacing.medium, vertical = HailToneSpacing.small), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.clip(HailToneShapes.control).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = HailToneSpacing.small), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            Modifier.size(if (lightUi) 30.dp else 22.dp).clip(CircleShape)
-                .background(if (lightUi && key == selected) palette.bronze.copy(alpha = 0.12f) else Color.Transparent),
+            Modifier.size(22.dp).clip(CircleShape)
+                .background(if (key == selected) palette.glow else Color.Transparent),
             contentAlignment = Alignment.Center,
         ) { androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides tint) { icon() } }
         Text(label, color = tint, fontSize = 11.sp, fontWeight = if (key == selected) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.padding(top = HailToneSpacing.xSmall))
@@ -877,14 +852,13 @@ private fun BottomNavigationItem(label: String, key: String, selected: String, o
 @Composable
 internal fun ScreenHeader(title: String) {
     val palette = LocalHailTonePalette.current
-    val lightUi = palette == HailTonePalettes.Light
-    Text(title, color = palette.text, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(horizontal = HailToneSpacing.large, vertical = if (lightUi) 20.dp else HailToneSpacing.medium))
+    Text(title, color = palette.text, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(horizontal = HailToneSpacing.large, vertical = HailToneSpacing.medium))
 }
 
 @Composable
 private fun BronzeButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val palette = LocalHailTonePalette.current
-    Button(onClick = onClick, modifier = modifier.height(54.dp), shape = if (palette == HailTonePalettes.Light) HailToneShapes.control else HailToneShapes.capsule, colors = ButtonDefaults.buttonColors(containerColor = palette.bronze, contentColor = Color.White)) {
+    Button(onClick = onClick, modifier = modifier.height(54.dp), shape = HailToneShapes.control, colors = ButtonDefaults.buttonColors(containerColor = palette.bronze, contentColor = Color.White)) {
         Text(label, style = MaterialTheme.typography.labelLarge)
     }
 }

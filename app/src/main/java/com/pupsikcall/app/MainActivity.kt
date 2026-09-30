@@ -55,6 +55,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -90,6 +91,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringArrayResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -395,7 +397,6 @@ private fun HailToneApp(
     }
     val appSettingsState by appSettingsRepository.state.collectAsState()
     val appSettings = (appSettingsState as? AppSettingsState.Ready)?.settings ?: AppSettings()
-    val appearanceMode = appSettings.appearance
     var verifiedAutoAnswerContacts by remember(authenticatedUserId) {
         mutableStateOf<List<HailToneContactLink>>(emptyList())
     }
@@ -860,21 +861,16 @@ private fun HailToneApp(
         dispatchIncomingCallNotificationAction(action.kind, handleAnswer, handleDecline)
     }
 
-    HailToneTheme(appearanceMode) {
+    HailToneTheme {
         val palette = LocalHailTonePalette.current
-        val darkAppearance = when (appearanceMode) {
-            AppearanceMode.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme()
-            AppearanceMode.LIGHT -> false
-            AppearanceMode.DARK -> true
-        }
         SideEffect {
             val window = (context as? Activity)?.window
             if (window != null) {
                 window.statusBarColor = palette.background.toArgb()
                 window.navigationBarColor = palette.background.toArgb()
                 WindowInsetsControllerCompat(window, window.decorView).apply {
-                    isAppearanceLightStatusBars = !darkAppearance
-                    isAppearanceLightNavigationBars = !darkAppearance
+                    isAppearanceLightStatusBars = false
+                    isAppearanceLightNavigationBars = false
                 }
             }
         }
@@ -963,6 +959,7 @@ private fun HailToneApp(
                         },
                         onOpenContacts = { screen = DemoScreen.Contacts },
                         onOpenMessages = { screen = DemoScreen.Messages },
+                        onOpenSettings = { screen = DemoScreen.Settings },
                     )
                     DemoScreen.Messages -> HailToneMessagesScreen(
                         state = conversationListState,
@@ -977,6 +974,7 @@ private fun HailToneApp(
                         },
                         onOpenContacts = { screen = DemoScreen.Contacts },
                         onOpenCalls = { screen = DemoScreen.Calls },
+                        onOpenSettings = { screen = DemoScreen.Settings },
                     )
                     DemoScreen.Conversation -> selectedConversation?.let { conversation ->
                         HailToneConversationScreen(
@@ -1011,11 +1009,11 @@ private fun HailToneApp(
                         },
                         onOpenContacts = { screen = DemoScreen.Contacts },
                         onOpenCalls = { screen = DemoScreen.Calls },
+                        onOpenSettings = { screen = DemoScreen.Settings },
                     )
                     DemoScreen.Settings -> HailToneSettingsScreen(
                         settingsState = appSettingsState,
                         profileState = profileState,
-                        onAppearanceChange = { mode -> authScope.launch { appSettingsRepository.setAppearance(mode) } },
                         onAutoAnswerEnabledChange = { enabled -> authScope.launch { appSettingsRepository.setAutoAnswerEnabled(enabled) } },
                         onAutoAnswerDelayChange = { delay -> authScope.launch { appSettingsRepository.setAutoAnswerDelay(delay) } },
                         onRemoveTrustedUser = { userId -> authScope.launch { appSettingsRepository.removeTrustedUser(userId) } },
@@ -1045,6 +1043,9 @@ private fun HailToneApp(
                         languageNames = languageNames,
                         selectedLanguageIndex = selectedLanguageIndex,
                         onLanguageSelected = ::applyApplicationLanguage,
+                        onOpenContacts = { screen = DemoScreen.Contacts },
+                        onOpenCalls = { screen = DemoScreen.Calls },
+                        onOpenMessages = { screen = DemoScreen.Messages },
                         onOpenProfile = { screen = DemoScreen.Profile },
                         onLogout = logout,
                     )
@@ -1365,25 +1366,12 @@ private fun signInFieldColors() = OutlinedTextFieldDefaults.colors(
 
 @Composable
 private fun BrandMark() {
-    Box(
-        modifier = Modifier.size(102.dp).clip(CircleShape).background(PrimaryPurple),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(Icons.Filled.Call, contentDescription = null, tint = Color.White, modifier = Modifier.size(47.dp))
-        Canvas(Modifier.align(Alignment.TopEnd).padding(top = 20.dp, end = 17.dp).size(20.dp)) {
-            val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
-            drawArc(Color.White, -52f, 104f, false, style = stroke)
-            drawArc(
-                Color.White,
-                -52f,
-                104f,
-                false,
-                topLeft = androidx.compose.ui.geometry.Offset(4.dp.toPx(), 4.dp.toPx()),
-                size = androidx.compose.ui.geometry.Size(size.width - 8.dp.toPx(), size.height - 8.dp.toPx()),
-                style = stroke,
-            )
-        }
-    }
+    androidx.compose.foundation.Image(
+        painter = painterResource(R.drawable.meettone_logo),
+        contentDescription = stringResource(R.string.meettone_logo_description),
+        contentScale = ContentScale.Fit,
+        modifier = Modifier.size(88.dp),
+    )
 }
 
 @Composable

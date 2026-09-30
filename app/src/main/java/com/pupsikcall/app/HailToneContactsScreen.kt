@@ -290,7 +290,7 @@ internal fun HailToneContactsScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = HailToneSpacing.large, vertical = HailToneSpacing.small),
             )
         }
-        HailToneBottomNavigation("contacts", {}, onOpenCalls, onOpenMessages)
+        HailToneBottomNavigation("contacts", {}, onOpenCalls, onOpenMessages, onOpenSettings)
     }
 
     if (showAddContact) {
@@ -438,13 +438,12 @@ private fun ColumnScope.CenteredContactsMessage(content: @Composable () -> Unit)
 @Composable
 private fun LocalContactRow(contact: LocalPhoneContact, onClick: () -> Unit) {
     val palette = LocalHailTonePalette.current
-    val lightUi = palette == HailTonePalettes.Light
     Row(
         Modifier.fillMaxWidth()
             .clickable(onClick = onClick)
             .clip(HailToneShapes.panel)
             .background(palette.surfaceRaised)
-            .then(if (lightUi) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.panel) else Modifier)
+            .border(1.dp, palette.outline, HailToneShapes.panel)
             .padding(HailToneSpacing.medium),
         verticalAlignment = Alignment.CenterVertically,
     ) {

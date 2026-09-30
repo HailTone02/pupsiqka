@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">HailTone</string>
+    <string name="app_name">MeetTone</string>
     <string name="tagline">Simple. Privé. Appels gratuits.</string>
     <string name="checking_session">Vérification de la session</string>
     <string name="register_title">Créer votre compte</string>
@@ -33,13 +33,13 @@
     <string name="log_out">Se déconnecter</string>
     <string name="add_contact">Ajouter un contact</string>
     <string name="call_contact">Appeler %1$s</string>
-    <string name="peer_a">HailTone A</string>
-    <string name="peer_b">HailTone B</string>
+    <string name="peer_a">MeetTone A</string>
+    <string name="peer_b">MeetTone B</string>
     <string name="online">En ligne</string>
     <string name="offline">Hors ligne</string>
     <string name="settings">Paramètres</string>
     <string name="incoming_call">Appel entrant</string>
-    <string name="incoming_call_channel_name">Appels HailTone</string>
+    <string name="incoming_call_channel_name">Appels MeetTone</string>
     <string name="incoming_call_status">Quelqu’un vous appelle…</string>
     <string name="answer">Répondre</string>
     <string name="decline">Refuser</string>
@@ -77,14 +77,14 @@
     <string name="settings_loading">Chargement des paramètres</string>
     <string name="settings_storage_error">Impossible de charger ou d’enregistrer les paramètres.</string>
     <string name="auto_answer">Réponse automatique</string>
-    <string name="auto_answer_description">Répondre uniquement aux appels de comptes HailTone explicitement approuvés.</string>
+    <string name="auto_answer_description">Répondre uniquement aux appels de comptes MeetTone explicitement approuvés.</string>
     <string name="auto_answer_pending">La réponse automatique au premier plan s’applique uniquement aux appelants authentifiés explicitement approuvés, après 0, 2 ou 5 secondes. La réponse en arrière-plan nécessite une future infrastructure d’appels entrants.</string>
     <string name="auto_answer_delay">Délai de réponse</string>
     <string name="auto_answer_delay_zero">0 s</string>
     <string name="auto_answer_delay_two">2 s</string>
     <string name="auto_answer_delay_five">5 s</string>
     <string name="trusted_auto_answer_contacts">Comptes approuvés</string>
-    <string name="trusted_auto_answer_explanation">La confiance exige un identifiant authentifié d’utilisateur HailTone. Un nom ou un numéro de téléphone ne donne jamais cette autorisation.</string>
+    <string name="trusted_auto_answer_explanation">La confiance exige un identifiant authentifié d’utilisateur MeetTone. Un nom ou un numéro de téléphone ne donne jamais cette autorisation.</string>
     <string name="trusted_auto_answer_empty">Aucun compte approuvé.</string>
     <string name="trusted_auto_answer_unavailable">La mise en correspondance des comptes n’est pas encore disponible. Vous ne pouvez pas en ajouter ici.</string>
     <string name="remove_trusted_contact">Retirer</string>
@@ -105,7 +105,7 @@
     <string name="contacts_error">Impossible de charger les contacts.</string>
     <string name="contacts_retry">Réessayer</string>
     <string name="contacts_permission_title">Autoriser l’accès aux contacts</string>
-    <string name="contacts_permission_message">HailTone lit les contacts de cet appareil pour afficher les noms et numéros de téléphone. Votre carnet d’adresses reste sur cet appareil.</string>
+    <string name="contacts_permission_message">MeetTone lit les contacts de cet appareil pour afficher les noms et numéros de téléphone. Votre carnet d’adresses reste sur cet appareil.</string>
     <string name="contacts_permission_denied">L’accès aux contacts a été refusé. Vous pouvez le demander à nouveau.</string>
     <string name="contacts_permission_settings_message">L’accès aux contacts est désactivé. Activez-le dans les paramètres de l’application pour les afficher.</string>
     <string name="contacts_permission_allow">Autoriser les contacts</string>

@@ -58,6 +58,7 @@ internal fun HailToneMessagesScreen(
     onOpenConversation: (MessageConversation) -> Unit,
     onOpenContacts: () -> Unit,
     onOpenCalls: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val palette = LocalHailTonePalette.current
     Column(Modifier.fillMaxSize().background(palette.background)) {
@@ -99,7 +100,7 @@ internal fun HailToneMessagesScreen(
                 }
             }
         }
-        HailToneBottomNavigation("messages", onOpenContacts, onOpenCalls, {})
+        HailToneBottomNavigation("messages", onOpenContacts, onOpenCalls, {}, onOpenSettings)
     }
 }
 
@@ -181,7 +182,7 @@ internal fun HailToneConversationScreen(
                         verticalArrangement = Arrangement.spacedBy(HailToneSpacing.small),
                     ) {
                         items(currentState.messages, key = { it.id }) { message ->
-                            MessageBubble(message.body)
+                            MessageBubble(message.body, outgoing = message.senderId != conversation.otherUserId)
                         }
                     }
                 }
@@ -233,7 +234,7 @@ internal fun HailToneConversationScreen(
                         modifier = Modifier.weight(1f),
                         enabled = !sending,
                         placeholder = { Text(stringResource(R.string.message_hint)) },
-                        shape = HailToneShapes.capsule,
+                        shape = HailToneShapes.control,
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                         keyboardActions = KeyboardActions(onSend = { submitMessage(draft, conversation.id, pendingClientMessageId, { pendingClientMessageId = it }, { draft = it }, { sending = it }, { sendFailed = it }, onSend, scope) { result ->
@@ -241,6 +242,8 @@ internal fun HailToneConversationScreen(
                             if (verificationRequired) sendFailed = false
                         } }),
                         colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = palette.field,
+                            unfocusedContainerColor = palette.field,
                             focusedBorderColor = palette.bronze,
                             unfocusedBorderColor = palette.outline,
                             focusedTextColor = palette.text,
@@ -269,7 +272,7 @@ private fun ConversationRow(conversation: MessageConversation, onClick: () -> Un
     val title = conversation.displayName ?: stringResource(R.string.conversation)
     Row(
         Modifier.fillMaxWidth().clip(HailToneShapes.panel).background(palette.surfaceRaised)
-            .then(if (palette == HailTonePalettes.Light) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.panel) else Modifier)
+            .border(1.dp, palette.outline, HailToneShapes.panel)
             .clickable(onClick = onClick).padding(HailToneSpacing.medium),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -291,17 +294,19 @@ private fun ConversationAvatar(name: String) {
 }
 
 @Composable
-private fun MessageBubble(body: String) {
+private fun MessageBubble(body: String, outgoing: Boolean) {
     val palette = LocalHailTonePalette.current
-    Text(
-        body,
-        color = palette.text,
-        style = MaterialTheme.typography.bodyMedium,
-        modifier = Modifier.fillMaxWidth().clip(HailToneShapes.panel)
-            .background(if (palette == HailTonePalettes.Light) palette.surfaceRaised else palette.surface)
-            .then(if (palette == HailTonePalettes.Light) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.panel) else Modifier)
-            .padding(horizontal = HailToneSpacing.medium, vertical = HailToneSpacing.small),
-    )
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (outgoing) Arrangement.End else Arrangement.Start) {
+        Text(
+            body,
+            color = palette.text,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.fillMaxWidth(0.84f).clip(HailToneShapes.panel)
+                .background(if (outgoing) palette.glow else palette.surfaceRaised)
+                .border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.panel)
+                .padding(horizontal = HailToneSpacing.medium, vertical = HailToneSpacing.small),
+        )
+    }
 }
 
 @Composable
