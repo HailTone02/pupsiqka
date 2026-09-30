@@ -4,6 +4,7 @@ import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -34,6 +35,8 @@ internal data class UserProfile(
 internal data class AuthenticatedUserIdentity(
     val userId: UUID,
 )
+
+internal val AUTHENTICATED_PROFILE_COLUMNS = listOf("user_id", "display_name", "avatar_path")
 
 internal sealed interface AuthenticatedProfileState {
     data object Loading : AuthenticatedProfileState
@@ -224,7 +227,7 @@ internal class AuthenticatedProfileRepository(
 
 private class SupabaseProfileGateway(private val client: SupabaseClient) : ProfileGateway {
     override suspend fun load(userId: UUID): UserProfile? {
-        val row = client.from("profiles").select {
+        val row = client.from("profiles").select(columns = Columns.list(*AUTHENTICATED_PROFILE_COLUMNS.toTypedArray())) {
             filter { eq("user_id", userId.toString()) }
         }.decodeList<JsonObject>().singleOrNull() ?: return null
         return UserProfile(

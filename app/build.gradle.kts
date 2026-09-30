@@ -1,4 +1,7 @@
 import java.util.Properties
+import java.net.URI
+import java.util.Base64
+import groovy.json.JsonSlurper
 
 val localProperties = Properties().apply {
     val configFile = rootProject.file("local.properties")
@@ -13,8 +16,36 @@ fun localBuildConfigValue(propertyName: String): String {
         .replace("\r", "")
 }
 
+val validateSupabaseClientConfiguration by tasks.registering {
+    doLast {
+        val supabaseUrl = localProperties.getProperty("supabase.url", "").trim()
+        val clientKey = localProperties.getProperty("supabase.publishableKey", "").trim()
+        val parsedUrl = runCatching { URI(supabaseUrl) }.getOrNull()
+        val validUrl = parsedUrl?.scheme.equals("https", ignoreCase = true) &&
+            !parsedUrl?.host.isNullOrBlank() && parsedUrl?.userInfo == null &&
+            parsedUrl?.query == null && parsedUrl?.fragment == null
+        val validPublishableKey = clientKey.matches(Regex("sb_publishable_[A-Za-z0-9_-]+"))
+        val legacyRole = runCatching {
+            val segments = clientKey.split('.')
+            if (segments.size != 3) null
+            else (JsonSlurper().parseText(String(Base64.getUrlDecoder().decode(segments[1]))) as? Map<*, *>)?.get("role") as? String
+        }.getOrNull()
+        val validLegacyAnonKey = legacyRole == "anon"
+
+        check(validUrl) { "Missing or invalid supabase.url in ignored local.properties" }
+        check(validPublishableKey || validLegacyAnonKey) {
+            "Missing or invalid supabase.publishableKey in ignored local.properties; use a publishable or legacy anon key"
+        }
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(validateSupabaseClientConfiguration)
+}
+
 plugins {
     id("com.android.application")
+    id("com.google.gms.google-services")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
@@ -34,11 +65,11 @@ android {
         }
         buildConfigField("String", "SUPABASE_URL", "\"${localBuildConfigValue("supabase.url")}\"")
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"${localBuildConfigValue("supabase.publishableKey")}\"")
-        buildConfigField("String", "PUPSIKCALL_DEVICE_ID", "\"${localBuildConfigValue("pupsikcall.deviceId")}\"")
-        buildConfigField("String", "PUPSIKCALL_TURN_URL", "\"${localBuildConfigValue("pupsikcall.turn.url")}\"")
-        buildConfigField("String", "PUPSIKCALL_TURN_USERNAME", "\"${localBuildConfigValue("pupsikcall.turn.username")}\"")
-        buildConfigField("String", "PUPSIKCALL_TURN_CREDENTIAL", "\"${localBuildConfigValue("pupsikcall.turn.credential")}\"")
-        buildConfigField("boolean", "PUPSIKCALL_DEBUG_FORCE_RELAY", localProperties.getProperty("pupsikcall.debug.forceRelay", "false").toBoolean().toString())
+        buildConfigField("String", "HAILTONE_DEVICE_ID", "\"${localBuildConfigValue("pupsikcall.deviceId")}\"")
+        buildConfigField("String", "HAILTONE_TURN_URL", "\"${localBuildConfigValue("pupsikcall.turn.url")}\"")
+        buildConfigField("String", "HAILTONE_TURN_USERNAME", "\"${localBuildConfigValue("pupsikcall.turn.username")}\"")
+        buildConfigField("String", "HAILTONE_TURN_CREDENTIAL", "\"${localBuildConfigValue("pupsikcall.turn.credential")}\"")
+        buildConfigField("boolean", "HAILTONE_DEBUG_FORCE_RELAY", localProperties.getProperty("pupsikcall.debug.forceRelay", "false").toBoolean().toString())
     }
 
     compileOptions {
@@ -63,6 +94,7 @@ dependencies {
     implementation(composeBom)
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-compose:1.12.0")
+    implementation("com.google.firebase:firebase-messaging:24.1.2")
     implementation("androidx.datastore:datastore-preferences:1.1.7")
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.material3:material3")

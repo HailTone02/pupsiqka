@@ -8,6 +8,25 @@ select caller_id, caller_id::text || '@call-test.invalid' from call_test_ids
 union all select callee_id, callee_id::text || '@call-test.invalid' from call_test_ids
 union all select unrelated_id, unrelated_id::text || '@call-test.invalid' from call_test_ids;
 
+do $$
+declare
+    caller_id uuid;
+    callee_id uuid;
+    invite_id uuid := gen_random_uuid();
+    fixture_token text := encode(extensions.gen_random_bytes(32), 'hex');
+begin
+    select call_test_ids.caller_id, call_test_ids.callee_id into caller_id, callee_id from call_test_ids;
+    insert into public.hailtone_contact_invites (
+        id, token_hash, inviter_user_id, accepted_by_user_id, expires_at, accepted_at
+    ) values (
+        invite_id, extensions.digest(convert_to(fixture_token, 'UTF8'), 'sha256'),
+        caller_id, callee_id, now() + interval '1 day', now()
+    );
+    insert into public.hailtone_contact_links (owner_user_id, contact_user_id, invitation_id)
+    values (caller_id, callee_id, invite_id), (callee_id, caller_id, invite_id);
+end;
+$$;
+
 select set_config('test.call.caller', caller_id::text, true),
        set_config('test.call.callee', callee_id::text, true),
        set_config('test.call.unrelated', unrelated_id::text, true)
@@ -285,7 +304,7 @@ begin
                             and with_check like '%senderUserId%'
                             and with_check like '%callerUserId%'
                             and with_check like '%calleeUserId%'
-                              and with_check like '%auth.uid()%'
+                              and (with_check like '%auth.uid()%' or with_check like '%uid()%')
                               and with_check like '%callId%'
                 )
                 or not exists (

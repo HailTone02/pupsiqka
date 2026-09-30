@@ -2,6 +2,7 @@ package com.pupsikcall.app
 
 import java.util.Locale
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 
 internal data class NormalizedPhoneNumber(val value: String)
 
@@ -45,10 +46,87 @@ internal sealed interface ContactsState {
     data object Error : ContactsState
 }
 
-internal data class MatchedPupsikAccount(val userId: UUID, val displayName: String?)
+internal data class MatchedHailToneAccount(
+    val userId: UUID,
+    val displayName: String?,
+    val avatarPath: String? = null,
+    val blockedByMe: Boolean = false,
+    val blockedMe: Boolean = false,
+)
 
-internal fun interface SelectedPhoneNumberMatcher {
-    suspend fun matchSelectedNumber(number: NormalizedPhoneNumber): MatchedPupsikAccount?
+internal fun interface SelectedContactIdentityMatcher {
+    suspend fun matchSelectedContact(contact: LocalPhoneContact): MatchedHailToneAccount?
+}
+
+internal sealed interface ContactIdentityResolution {
+    data object Checking : ContactIdentityResolution
+    data object LookupUnavailable : ContactIdentityResolution
+    data object Unverified : ContactIdentityResolution
+    data object Failed : ContactIdentityResolution
+    data class Resolved(val account: MatchedHailToneAccount) : ContactIdentityResolution
+}
+
+internal enum class AuthenticatedContactAction { CALL, MESSAGE }
+
+internal suspend fun resolveContactIdentity(
+    contact: LocalPhoneContact,
+    matcher: SelectedContactIdentityMatcher?,
+): ContactIdentityResolution {
+    if (matcher == null) return ContactIdentityResolution.LookupUnavailable
+    return try {
+        matcher.matchSelectedContact(contact)?.let(ContactIdentityResolution::Resolved)
+            ?: ContactIdentityResolution.Unverified
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        ContactIdentityResolution.Failed
+    }
+}
+
+internal fun routeAuthenticatedContactAction(
+    resolution: ContactIdentityResolution,
+    action: AuthenticatedContactAction,
+    onCall: (UUID) -> Unit,
+    onMessage: (UUID) -> Unit,
+): Boolean {
+    val account = (resolution as? ContactIdentityResolution.Resolved)?.account ?: return false
+    if (account.blockedByMe || account.blockedMe) return false
+    when (action) {
+        AuthenticatedContactAction.CALL -> onCall(account.userId)
+        AuthenticatedContactAction.MESSAGE -> onMessage(account.userId)
+    }
+    return true
+}
+
+internal data class ContactInviteCapability(val invitationId: UUID, val code: String)
+
+internal fun normalizeContactInvitationCode(input: String): String? =
+    input.trim().lowercase(Locale.ROOT).takeIf { it.matches(Regex("[0-9a-f]{64}")) }
+
+internal fun shouldOfferContactInvite(resolution: ContactIdentityResolution): Boolean =
+    resolution != ContactIdentityResolution.Checking && resolution !is ContactIdentityResolution.Resolved
+
+internal fun reconcileSelectedLocalContact(
+    selected: LocalPhoneContact?,
+    refreshedContacts: List<LocalPhoneContact>,
+): LocalPhoneContact? = selected?.let { old -> refreshedContacts.firstOrNull { it.lookupKey == old.lookupKey } }
+
+internal data class NewLocalContact(val displayName: String, val phoneNumber: String)
+
+internal fun newLocalContact(displayName: String, phoneNumber: String): NewLocalContact? {
+    val name = displayName.trim()
+    val phone = phoneNumber.trim()
+    if (name.isEmpty() || name.length > 120 || name.any(Char::isISOControl)) return null
+    if (phone.isEmpty() || normalizeLocalPhoneNumber(phone) == null) return null
+    return NewLocalContact(name, phone)
+}
+
+internal fun localContactShareText(contact: LocalPhoneContact): String = buildString {
+    append(contact.displayName)
+    contact.phoneNumbers.forEach { number ->
+        append('\n')
+        append(number.displayValue)
+    }
 }
 
 internal fun contactsPermissionStatus(

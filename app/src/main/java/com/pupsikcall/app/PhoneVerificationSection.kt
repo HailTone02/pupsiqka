@@ -40,7 +40,7 @@ internal fun PhoneVerificationSection(
     onResend: suspend () -> Unit,
     onVerify: suspend (String) -> Unit,
 ) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     val scope = rememberCoroutineScope()
     var phoneInput by remember { mutableStateOf("") }
     var otpInput by remember { mutableStateOf("") }
@@ -54,13 +54,13 @@ internal fun PhoneVerificationSection(
         }
     }
 
-    Column(Modifier.fillMaxWidth().padding(top = PupsikSpacing.large)) {
+    Column(Modifier.fillMaxWidth().padding(top = HailToneSpacing.large)) {
         Text(stringResource(R.string.phone_number), color = palette.text, style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(PupsikSpacing.small))
+        Spacer(Modifier.height(HailToneSpacing.small))
 
         when {
             state == PhoneVerificationState.Checking || state == PhoneVerificationState.RequestingOtp || state == PhoneVerificationState.Verifying -> {
-                Row(horizontalArrangement = Arrangement.spacedBy(PupsikSpacing.small)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(HailToneSpacing.small)) {
                     CircularProgressIndicator(Modifier.size(18.dp), color = palette.bronze, strokeWidth = 2.dp)
                     Text(
                         stringResource(if (state == PhoneVerificationState.Checking) R.string.phone_checking else R.string.phone_working),
@@ -84,7 +84,7 @@ internal fun PhoneVerificationSection(
                 OutlinedTextField(
                     value = otpInput,
                     onValueChange = { value -> otpInput = value.filter { it in '0'..'9' }.take(8) },
-                    modifier = Modifier.fillMaxWidth().padding(top = PupsikSpacing.small),
+                    modifier = Modifier.fillMaxWidth().padding(top = HailToneSpacing.small),
                     label = { Text(stringResource(R.string.phone_code_hint)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
@@ -96,7 +96,7 @@ internal fun PhoneVerificationSection(
                         unfocusedTextColor = palette.text,
                     ),
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(PupsikSpacing.small)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(HailToneSpacing.small)) {
                     Button(
                         onClick = {
                             val submittedOtp = otpInput
@@ -126,7 +126,7 @@ internal fun PhoneVerificationSection(
                 OutlinedTextField(
                     value = phoneInput,
                     onValueChange = { phoneInput = it },
-                    modifier = Modifier.fillMaxWidth().padding(top = PupsikSpacing.small),
+                    modifier = Modifier.fillMaxWidth().padding(top = HailToneSpacing.small),
                     label = { Text(stringResource(R.string.phone_input_hint)) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
@@ -140,7 +140,7 @@ internal fun PhoneVerificationSection(
                 Button(
                     onClick = { scope.launch { onRequest(phoneInput) } },
                     enabled = phoneInput.isNotBlank(),
-                    modifier = Modifier.padding(top = PupsikSpacing.small),
+                    modifier = Modifier.padding(top = HailToneSpacing.small),
                     colors = ButtonDefaults.buttonColors(containerColor = palette.bronze),
                 ) {
                     Text(stringResource(R.string.phone_request_code))

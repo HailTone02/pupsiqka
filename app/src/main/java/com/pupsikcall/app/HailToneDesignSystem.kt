@@ -27,7 +27,7 @@ internal enum class AppearanceMode(val preferenceValue: String) {
     }
 }
 
-internal data class PupsikPalette(
+internal data class HailTonePalette(
     val background: Color,
     val surface: Color,
     val surfaceRaised: Color,
@@ -44,8 +44,8 @@ internal data class PupsikPalette(
     val callGlass: Color,
 )
 
-internal object PupsikPalettes {
-    val Light = PupsikPalette(
+internal object HailTonePalettes {
+    val Light = HailTonePalette(
         background = Color(0xFFF7F3EB),
         surface = Color(0xFFEDE5D9),
         surfaceRaised = Color(0xFFFFFCF7),
@@ -62,7 +62,7 @@ internal object PupsikPalettes {
         callGlass = Color(0xA8FFF9F0),
     )
 
-    val Dark = PupsikPalette(
+    val Dark = HailTonePalette(
         background = Color(0xFF211D1A),
         surface = Color(0xFF2B2521),
         surfaceRaised = Color(0xFF342C26),
@@ -80,7 +80,7 @@ internal object PupsikPalettes {
     )
 }
 
-internal object PupsikSpacing {
+internal object HailToneSpacing {
     val xSmall = 4.dp
     val small = 8.dp
     val medium = 16.dp
@@ -89,22 +89,22 @@ internal object PupsikSpacing {
     val section = 40.dp
 }
 
-internal object PupsikShapes {
+internal object HailToneShapes {
     val control = RoundedCornerShape(14.dp)
     val panel = RoundedCornerShape(22.dp)
     val capsule = RoundedCornerShape(50)
 }
 
-internal val LocalPupsikPalette = staticCompositionLocalOf { PupsikPalettes.Dark }
+internal val LocalHailTonePalette = staticCompositionLocalOf { HailTonePalettes.Dark }
 
 @Composable
-internal fun PupsikTheme(mode: AppearanceMode, content: @Composable () -> Unit) {
+internal fun HailToneTheme(mode: AppearanceMode, content: @Composable () -> Unit) {
     val useDark = when (mode) {
         AppearanceMode.SYSTEM -> isSystemInDarkTheme()
         AppearanceMode.LIGHT -> false
         AppearanceMode.DARK -> true
     }
-    val palette = if (useDark) PupsikPalettes.Dark else PupsikPalettes.Light
+    val palette = if (useDark) HailTonePalettes.Dark else HailTonePalettes.Light
     val scheme = if (useDark) {
         darkColorScheme(
             primary = palette.bronze,
@@ -161,7 +161,7 @@ internal fun PupsikTheme(mode: AppearanceMode, content: @Composable () -> Unit) 
         large = RoundedCornerShape(26.dp),
         extraLarge = RoundedCornerShape(34.dp),
     )
-    CompositionLocalProvider(LocalPupsikPalette provides palette) {
+    CompositionLocalProvider(LocalHailTonePalette provides palette) {
         MaterialTheme(colorScheme = scheme, typography = typography, shapes = shapes, content = content)
     }
 }

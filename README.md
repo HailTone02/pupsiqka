@@ -1,4 +1,4 @@
-# PupsikCall
+# HailTone
 
 A minimal native Android app built with Kotlin and Jetpack Compose.
 
@@ -26,10 +26,10 @@ Build one APK per identity. The app targets the other fixed identity automatical
 
 ```sh
 ./gradlew assembleDebug
-cp app/build/outputs/apk/debug/app-debug.apk /tmp/pupsikcall-device-a.apk
+cp app/build/outputs/apk/debug/app-debug.apk /tmp/hailtone-device-a.apk
 # Change pupsikcall.deviceId to pupsik-b in local.properties before the next build.
 ./gradlew assembleDebug
-cp app/build/outputs/apk/debug/app-debug.apk /tmp/pupsikcall-device-b.apk
+cp app/build/outputs/apk/debug/app-debug.apk /tmp/hailtone-device-b.apk
 ```
 
 Install the saved APKs on their matching devices, keep both apps open and online, and grant microphone permission when prompted. Tap the existing Sign In button on both devices to reach Contacts, then start the call from Device A. Device B receives the incoming call and can Answer or Decline. End Call terminates the peer session on both devices.

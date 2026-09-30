@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.runBlocking
+import java.util.UUID
 
 class LocalContactsTest {
     @Test
@@ -91,6 +93,134 @@ class LocalContactsTest {
         assertEquals(1, filterLocalContacts(contacts, "lovelace").size)
         assertEquals(1, filterLocalContacts(contacts, "202 555").size)
         assertTrue(filterLocalContacts(contacts, "nobody").isEmpty())
+    }
+
+    @Test
+    fun unresolvedContactCannotRouteCallOrMessage() = runBlocking {
+        val contact = assembleLocalContacts(listOf(record(1, "local", "Local Name", "+12025550123"))).single()
+        val calls = mutableListOf<UUID>()
+        val messages = mutableListOf<UUID>()
+        val result = resolveContactIdentity(contact, null)
+
+        assertEquals(ContactIdentityResolution.LookupUnavailable, result)
+        assertTrue(!routeAuthenticatedContactAction(result, AuthenticatedContactAction.CALL, calls::add, messages::add))
+        assertTrue(!routeAuthenticatedContactAction(result, AuthenticatedContactAction.MESSAGE, calls::add, messages::add))
+        assertTrue(calls.isEmpty())
+        assertTrue(messages.isEmpty())
+    }
+
+    @Test
+    fun authenticatedActionsUseOnlyResolvedSupabaseUuid() = runBlocking {
+        val contact = assembleLocalContacts(listOf(record(1, "local", "Spoofed Local Name", "+12025550123"))).single()
+        val userId = UUID.fromString("00000000-0000-4000-8000-000000000099")
+        val resolution = resolveContactIdentity(contact, SelectedContactIdentityMatcher {
+            assertEquals("local", it.lookupKey)
+            MatchedHailToneAccount(userId, "Verified Profile")
+        })
+        val calls = mutableListOf<UUID>()
+        val messages = mutableListOf<UUID>()
+
+        assertTrue(routeAuthenticatedContactAction(resolution, AuthenticatedContactAction.CALL, calls::add, messages::add))
+        assertTrue(routeAuthenticatedContactAction(resolution, AuthenticatedContactAction.MESSAGE, calls::add, messages::add))
+        assertEquals(listOf(userId), calls)
+        assertEquals(listOf(userId), messages)
+        assertEquals("Verified Profile", (resolution as ContactIdentityResolution.Resolved).account.displayName)
+    }
+
+    @Test
+    fun identityMatcherReceivesSelectedContactAssociationRatherThanAnIndividualPhoneNumber() = runBlocking {
+        val contact = assembleLocalContacts(
+            listOf(
+                record(1, "local", "Local Name", "+12025550123"),
+                record(1, "local", "Local Name", "+12025550124"),
+            ),
+        ).single()
+        var lookupCount = 0
+        val resolution = resolveContactIdentity(contact, SelectedContactIdentityMatcher { selected ->
+            lookupCount++
+            assertEquals(contact.lookupKey, selected.lookupKey)
+            assertEquals(2, selected.phoneNumbers.size)
+            null
+        })
+        assertEquals(1, lookupCount)
+        assertEquals(ContactIdentityResolution.Unverified, resolution)
+    }
+
+    @Test
+    fun identityLookupFailureRemainsUnverifiedAndCannotAuthorizeActions() = runBlocking {
+        val contact = assembleLocalContacts(listOf(record(1, "local", "Local Name", "+12025550123"))).single()
+        val resolution = resolveContactIdentity(contact, SelectedContactIdentityMatcher {
+            throw IllegalStateException("private backend details")
+        })
+        val routedIds = mutableListOf<UUID>()
+
+        assertEquals(ContactIdentityResolution.Failed, resolution)
+        assertTrue(shouldOfferContactInvite(resolution))
+        assertTrue(!routeAuthenticatedContactAction(resolution, AuthenticatedContactAction.CALL, routedIds::add, routedIds::add))
+        assertTrue(routedIds.isEmpty())
+    }
+
+    @Test
+    fun blockedAuthoritativeContactCannotRouteCallOrMessage() {
+        val userId = UUID.fromString("00000000-0000-4000-8000-000000000097")
+        val resolution = ContactIdentityResolution.Resolved(
+            MatchedHailToneAccount(userId, "Verified Profile", blockedByMe = true),
+        )
+        val routedIds = mutableListOf<UUID>()
+
+        assertTrue(!routeAuthenticatedContactAction(resolution, AuthenticatedContactAction.CALL, routedIds::add, routedIds::add))
+        assertTrue(!routeAuthenticatedContactAction(resolution, AuthenticatedContactAction.MESSAGE, routedIds::add, routedIds::add))
+        assertTrue(routedIds.isEmpty())
+    }
+
+    @Test
+    fun contactBlockedByTheOtherAccountCannotRouteCallOrMessage() {
+        val userId = UUID.fromString("00000000-0000-4000-8000-000000000096")
+        val resolution = ContactIdentityResolution.Resolved(
+            MatchedHailToneAccount(userId, "Verified Profile", blockedMe = true),
+        )
+        val routedIds = mutableListOf<UUID>()
+
+        assertTrue(!routeAuthenticatedContactAction(resolution, AuthenticatedContactAction.CALL, routedIds::add, routedIds::add))
+        assertTrue(!routeAuthenticatedContactAction(resolution, AuthenticatedContactAction.MESSAGE, routedIds::add, routedIds::add))
+        assertTrue(routedIds.isEmpty())
+    }
+
+    @Test
+    fun contactDraftRequiresRealNameAndValidPhoneAndShareUsesOnlyLocalDetails() {
+        assertNull(newLocalContact("  ", "+12025550123"))
+        assertNull(newLocalContact("Name", "not a phone"))
+        assertEquals(NewLocalContact("Name", "+12025550123"), newLocalContact(" Name ", " +12025550123 "))
+        val contact = assembleLocalContacts(listOf(record(1, "local", "Ada Example", "+12025550123"))).single()
+        assertEquals("Ada Example\n+12025550123", localContactShareText(contact))
+    }
+
+    @Test
+    fun invitationCodesAreNormalizedButMalformedValuesAreRejected() {
+        val code = "a".repeat(64)
+        assertEquals(code, normalizeContactInvitationCode(" ${code.uppercase()} "))
+        assertNull(normalizeContactInvitationCode("not-an-invite"))
+        assertNull(normalizeContactInvitationCode("a".repeat(63)))
+    }
+
+    @Test
+    fun inviteIsOfferedOnlyAfterLookupStopsAndVerifiedMatchesDoNotGetInvited() {
+        assertTrue(!shouldOfferContactInvite(ContactIdentityResolution.Checking))
+        assertTrue(shouldOfferContactInvite(ContactIdentityResolution.LookupUnavailable))
+        assertTrue(shouldOfferContactInvite(ContactIdentityResolution.Unverified))
+        assertTrue(shouldOfferContactInvite(ContactIdentityResolution.Failed))
+        assertTrue(!shouldOfferContactInvite(ContactIdentityResolution.Resolved(MatchedHailToneAccount(
+            UUID.fromString("00000000-0000-4000-8000-000000000098"), "Verified Name",
+        ))))
+    }
+
+    @Test
+    fun refreshedContactsUpdateOrCloseTheSelectedDetailsContact() {
+        val original = assembleLocalContacts(listOf(record(1, "local", "Original Name", "+12025550123"))).single()
+        val updated = assembleLocalContacts(listOf(record(1, "local", "Updated Name", "+12025550123"))).single()
+
+        assertEquals(updated, reconcileSelectedLocalContact(original, listOf(updated)))
+        assertNull(reconcileSelectedLocalContact(original, emptyList()))
     }
 
     private fun record(id: Long, key: String, name: String, number: String) =

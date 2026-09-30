@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">PupsikCall</string>
+    <string name="app_name">HailTone</string>
     <string name="tagline">E thjeshtë. Private. Telefonata falas.</string>
     <string name="checking_session">Po kontrollohet sesioni</string>
     <string name="register_title">Krijo llogarinë tënde</string>
@@ -33,12 +33,13 @@
     <string name="log_out">Dil</string>
     <string name="add_contact">Shto kontakt</string>
     <string name="call_contact">Telefono %1$s</string>
-    <string name="peer_a">Pupsik A</string>
-    <string name="peer_b">Pupsik B</string>
+    <string name="peer_a">HailTone A</string>
+    <string name="peer_b">HailTone B</string>
     <string name="online">Në linjë</string>
     <string name="offline">Jashtë linje</string>
     <string name="settings">Cilësimet</string>
     <string name="incoming_call">Telefonatë hyrëse</string>
+    <string name="incoming_call_channel_name">Thirrjet HailTone</string>
     <string name="incoming_call_status">Po të telefonojnë…</string>
     <string name="answer">Përgjigju</string>
     <string name="decline">Refuzo</string>
@@ -76,14 +77,14 @@
     <string name="settings_loading">Po ngarkohen cilësimet</string>
     <string name="settings_storage_error">Cilësimet nuk mund të ngarkoheshin ose ruheshin.</string>
     <string name="auto_answer">Përgjigje automatike</string>
-    <string name="auto_answer_description">Përgjigju vetëm thirrjeve nga llogari të besuara shprehimisht të PupsikCall.</string>
+    <string name="auto_answer_description">Përgjigju vetëm thirrjeve nga llogari të besuara shprehimisht të HailTone.</string>
     <string name="auto_answer_pending">Përgjigjja automatike në plan të parë zbatohet vetëm për telefonues të vërtetuar dhe të besuar shprehimisht, me vonesë 0, 2 ose 5 sekonda. Përgjigjja në sfond kërkon infrastrukturën e ardhshme të thirrjeve hyrëse.</string>
     <string name="auto_answer_delay">Vonesa e përgjigjes automatike</string>
     <string name="auto_answer_delay_zero">0 sek.</string>
     <string name="auto_answer_delay_two">2 sek.</string>
     <string name="auto_answer_delay_five">5 sek.</string>
     <string name="trusted_auto_answer_contacts">Llogari të besuara</string>
-    <string name="trusted_auto_answer_explanation">Besimi kërkon ID të autentifikuar të përdoruesit PupsikCall. Emri ose numri i telefonit nuk jep leje.</string>
+    <string name="trusted_auto_answer_explanation">Besimi kërkon ID të autentifikuar të përdoruesit HailTone. Emri ose numri i telefonit nuk jep leje.</string>
     <string name="trusted_auto_answer_empty">Nuk ka llogari të besuara.</string>
     <string name="trusted_auto_answer_unavailable">Përputhja e llogarive nuk është ende e disponueshme, ndaj nuk mund të shtosh llogari të besuara këtu.</string>
     <string name="remove_trusted_contact">Hiq</string>
@@ -104,7 +105,7 @@
     <string name="contacts_error">Kontaktet nuk mund të ngarkoheshin.</string>
     <string name="contacts_retry">Provo përsëri</string>
     <string name="contacts_permission_title">Lejo qasjen te kontaktet</string>
-    <string name="contacts_permission_message">PupsikCall lexon kontaktet në këtë pajisje për të shfaqur emrat dhe numrat e telefonit. Libri i kontakteve mbetet në pajisje.</string>
+    <string name="contacts_permission_message">HailTone lexon kontaktet në këtë pajisje për të shfaqur emrat dhe numrat e telefonit. Libri i kontakteve mbetet në pajisje.</string>
     <string name="contacts_permission_denied">Qasja te kontaktet u refuzua. Mund ta kërkosh përsëri.</string>
     <string name="contacts_permission_settings_message">Qasja është çaktivizuar. Aktivizoje te cilësimet e aplikacionit për të parë kontaktet.</string>
     <string name="contacts_permission_allow">Lejo kontaktet</string>

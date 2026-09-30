@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">PupsikCall</string>
+    <string name="app_name">HailTone</string>
     <string name="tagline">Sade. Özel. Ücretsiz aramalar.</string>
     <string name="checking_session">Oturum denetleniyor</string>
     <string name="register_title">Hesabını oluştur</string>
@@ -33,12 +33,13 @@
     <string name="log_out">Çıkış yap</string>
     <string name="add_contact">Kişi ekle</string>
     <string name="call_contact">%1$s kişisini ara</string>
-    <string name="peer_a">Pupsik A</string>
-    <string name="peer_b">Pupsik B</string>
+    <string name="peer_a">HailTone A</string>
+    <string name="peer_b">HailTone B</string>
     <string name="online">Çevrimiçi</string>
     <string name="offline">Çevrimdışı</string>
     <string name="settings">Ayarlar</string>
     <string name="incoming_call">Gelen arama</string>
+    <string name="incoming_call_channel_name">HailTone aramaları</string>
     <string name="incoming_call_status">Aranıyorsun…</string>
     <string name="answer">Yanıtla</string>
     <string name="decline">Reddet</string>
@@ -76,14 +77,14 @@
     <string name="settings_loading">Ayarlar yükleniyor</string>
     <string name="settings_storage_error">Ayarlar yüklenemedi veya kaydedilemedi.</string>
     <string name="auto_answer">Otomatik yanıt</string>
-    <string name="auto_answer_description">Yalnızca açıkça güvenilen PupsikCall hesaplarından gelen aramaları yanıtlar.</string>
+    <string name="auto_answer_description">Yalnızca açıkça güvenilen HailTone hesaplarından gelen aramaları yanıtlar.</string>
     <string name="auto_answer_pending">Ön planda otomatik yanıt yalnızca açıkça güvenilen, kimliği doğrulanmış arayanlar için 0, 2 veya 5 saniye gecikmeyle çalışır. Arka planda otomatik yanıt için daha sonra gelen arama altyapısı gerekir.</string>
     <string name="auto_answer_delay">Otomatik yanıt gecikmesi</string>
     <string name="auto_answer_delay_zero">0 sn</string>
     <string name="auto_answer_delay_two">2 sn</string>
     <string name="auto_answer_delay_five">5 sn</string>
     <string name="trusted_auto_answer_contacts">Güvenilen hesaplar</string>
-    <string name="trusted_auto_answer_explanation">Güven için kimliği doğrulanmış bir PupsikCall kullanıcı kimliği gerekir. Kişi adı veya telefon numarası izin vermez.</string>
+    <string name="trusted_auto_answer_explanation">Güven için kimliği doğrulanmış bir HailTone kullanıcı kimliği gerekir. Kişi adı veya telefon numarası izin vermez.</string>
     <string name="trusted_auto_answer_empty">Güvenilen hesap yok.</string>
     <string name="trusted_auto_answer_unavailable">Hesap eşleştirme henüz kullanılamıyor; burada güvenilen hesap eklenemez.</string>
     <string name="remove_trusted_contact">Kaldır</string>
@@ -104,7 +105,7 @@
     <string name="contacts_error">Kişiler yüklenemedi.</string>
     <string name="contacts_retry">Tekrar dene</string>
     <string name="contacts_permission_title">Kişi erişimine izin ver</string>
-    <string name="contacts_permission_message">PupsikCall, adları ve telefon numaralarını göstermek için bu cihazdaki kişileri okur. Adres defteriniz bu cihazda kalır.</string>
+    <string name="contacts_permission_message">HailTone, adları ve telefon numaralarını göstermek için bu cihazdaki kişileri okur. Adres defteriniz bu cihazda kalır.</string>
     <string name="contacts_permission_denied">Kişi erişimi reddedildi. Yeniden izin isteyebilirsiniz.</string>
     <string name="contacts_permission_settings_message">Kişi erişimi kapalı. Kişileri görmek için uygulama ayarlarından etkinleştirin.</string>
     <string name="contacts_permission_allow">Kişilere izin ver</string>

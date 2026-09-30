@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">PupsikCall</string>
+    <string name="app_name">HailTone</string>
     <string name="tagline">Semplice. Riservato. Chiamate gratuite.</string>
     <string name="checking_session">Verifica della sessione in corso</string>
     <string name="register_title">Crea il tuo account</string>
@@ -33,12 +33,13 @@
     <string name="log_out">Esci</string>
     <string name="add_contact">Aggiungi contatto</string>
     <string name="call_contact">Chiama %1$s</string>
-    <string name="peer_a">Pupsik A</string>
-    <string name="peer_b">Pupsik B</string>
+    <string name="peer_a">HailTone A</string>
+    <string name="peer_b">HailTone B</string>
     <string name="online">Online</string>
     <string name="offline">Offline</string>
     <string name="settings">Impostazioni</string>
     <string name="incoming_call">Chiamata in arrivo</string>
+    <string name="incoming_call_channel_name">Chiamate HailTone</string>
     <string name="incoming_call_status">Ti stanno chiamando…</string>
     <string name="answer">Rispondi</string>
     <string name="decline">Rifiuta</string>
@@ -76,14 +77,14 @@
     <string name="settings_loading">Caricamento impostazioni</string>
     <string name="settings_storage_error">Impossibile caricare o salvare le impostazioni.</string>
     <string name="auto_answer">Risposta automatica</string>
-    <string name="auto_answer_description">Risponde solo alle chiamate da account PupsikCall esplicitamente attendibili.</string>
+    <string name="auto_answer_description">Risponde solo alle chiamate da account HailTone esplicitamente attendibili.</string>
     <string name="auto_answer_pending">La risposta automatica in primo piano vale solo per chiamanti autenticati e approvati esplicitamente, con un ritardo di 0, 2 o 5 secondi. La risposta in background richiede la futura infrastruttura per le chiamate in arrivo.</string>
     <string name="auto_answer_delay">Ritardo risposta</string>
-    <string name="auto_answer_delay_zero">0 sec</string>
-    <string name="auto_answer_delay_two">2 sec</string>
-    <string name="auto_answer_delay_five">5 sec</string>
+    <string name="auto_answer_delay_zero">0 s</string>
+    <string name="auto_answer_delay_two">2 s</string>
+    <string name="auto_answer_delay_five">5 s</string>
     <string name="trusted_auto_answer_contacts">Account attendibili</string>
-    <string name="trusted_auto_answer_explanation">La fiducia richiede un ID utente PupsikCall autenticato. Nome e numero di telefono non autorizzano mai la risposta.</string>
+    <string name="trusted_auto_answer_explanation">La fiducia richiede un ID utente HailTone autenticato. Nome e numero di telefono non autorizzano mai la risposta.</string>
     <string name="trusted_auto_answer_empty">Nessun account attendibile.</string>
     <string name="trusted_auto_answer_unavailable">L’abbinamento degli account non è ancora disponibile, quindi non puoi aggiungerne qui.</string>
     <string name="remove_trusted_contact">Rimuovi</string>
@@ -104,7 +105,7 @@
     <string name="contacts_error">Impossibile caricare i contatti.</string>
     <string name="contacts_retry">Riprova</string>
     <string name="contacts_permission_title">Consenti l’accesso ai contatti</string>
-    <string name="contacts_permission_message">PupsikCall legge i contatti su questo dispositivo per mostrare nomi e numeri di telefono. La rubrica resta su questo dispositivo.</string>
+    <string name="contacts_permission_message">HailTone legge i contatti su questo dispositivo per mostrare nomi e numeri di telefono. La rubrica resta su questo dispositivo.</string>
     <string name="contacts_permission_denied">Accesso ai contatti negato. Puoi richiederlo di nuovo.</string>
     <string name="contacts_permission_settings_message">L’accesso ai contatti è disattivato. Attivalo nelle impostazioni dell’app per visualizzarli.</string>
     <string name="contacts_permission_allow">Consenti contatti</string>

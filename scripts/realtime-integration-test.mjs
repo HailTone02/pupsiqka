@@ -30,7 +30,7 @@ socketUrl.pathname = `${socketUrl.pathname.replace(/\/+$/, "")}/realtime/v1/webs
 socketUrl.search = "";
 socketUrl.searchParams.set("apikey", publishableKey);
 socketUrl.searchParams.set("vsn", "1.0.0");
-socketUrl.searchParams.set("client", "pupsikcall-codespaces-integration/1.0");
+socketUrl.searchParams.set("client", "hailtone-codespaces-integration/1.0");
 
 const runId = randomUUID();
 const callId = `codespaces-${runId}`;

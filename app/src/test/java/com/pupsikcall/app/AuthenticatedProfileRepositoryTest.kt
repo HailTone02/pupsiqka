@@ -5,12 +5,20 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.UUID
 
 class AuthenticatedProfileRepositoryTest {
+    @Test
+    fun authenticatedProfileProjectionUsesOnlyColumnsGrantedByRls() {
+        assertEquals(listOf("user_id", "display_name", "avatar_path"), AUTHENTICATED_PROFILE_COLUMNS)
+        assertFalse(AUTHENTICATED_PROFILE_COLUMNS.contains("created_at"))
+        assertFalse(AUTHENTICATED_PROFILE_COLUMNS.contains("updated_at"))
+    }
+
     @Test
     fun restoredAuthenticatedSessionUsesItsUuidAsCanonicalIdentity() = runBlocking {
         val userId = UUID.fromString("00000000-0000-4000-8000-000000000011")

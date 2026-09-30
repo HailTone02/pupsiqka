@@ -13,6 +13,24 @@ import java.util.UUID
 
 class AuthenticatedCallRoutingTest {
     @Test
+    fun supabaseClientConfigurationRequiresHttpsAndPublicClientKey() {
+        assertTrue(isValidSupabaseClientConfiguration("https://example.supabase.co", "sb_publishable_test-key"))
+        assertTrue(isValidSupabaseClientConfiguration("https://example.supabase.co", legacyJwt("anon")))
+        assertFalse(isValidSupabaseClientConfiguration("", "sb_publishable_test-key"))
+        assertFalse(isValidSupabaseClientConfiguration("http://example.supabase.co", "sb_publishable_test-key"))
+        assertFalse(isValidSupabaseClientConfiguration("https://example.supabase.co", ""))
+        assertFalse(isValidSupabaseClientConfiguration("https://example.supabase.co", "sb_secret_test-key"))
+        assertFalse(isValidSupabaseClientConfiguration("https://example.supabase.co", legacyJwt("service_role")))
+        assertFalse(isValidSupabaseClientConfiguration("https://user@example.supabase.co", "sb_publishable_test-key"))
+    }
+
+    private fun legacyJwt(role: String): String {
+        val payload = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("{\"role\":\"$role\"}".toByteArray())
+        return "eyJhbGciOiJIUzI1NiJ9.$payload.signature"
+    }
+
+    @Test
     fun localIdentityIsParsedOnlyFromAuthenticatedUuid() {
         assertEquals(callerId, authenticatedCallUserId(callerId.toString()))
         assertNull(authenticatedCallUserId(null))

@@ -4,7 +4,9 @@ import android.os.Bundle
 import android.util.Log
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.activity.compose.BackHandler
@@ -61,6 +63,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
@@ -98,17 +101,17 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
 
-private val AppBackground: Color @Composable get() = LocalPupsikPalette.current.background
-private val AppSurface: Color @Composable get() = LocalPupsikPalette.current.surface
-private val FieldBackground: Color @Composable get() = LocalPupsikPalette.current.field
-private val FieldBorder: Color @Composable get() = LocalPupsikPalette.current.outline
-private val PrimaryPurple: Color @Composable get() = LocalPupsikPalette.current.bronze
-private val LightPurple: Color @Composable get() = LocalPupsikPalette.current.caramel
-private val OnlineGreen: Color @Composable get() = LocalPupsikPalette.current.online
-private val DeclineRed: Color @Composable get() = LocalPupsikPalette.current.danger
-private val MainText: Color @Composable get() = LocalPupsikPalette.current.text
-private val SecondaryText: Color @Composable get() = LocalPupsikPalette.current.muted
-private const val PermissionLogTag = "PupsikCallPermission"
+private val AppBackground: Color @Composable get() = LocalHailTonePalette.current.background
+private val AppSurface: Color @Composable get() = LocalHailTonePalette.current.surface
+private val FieldBackground: Color @Composable get() = LocalHailTonePalette.current.field
+private val FieldBorder: Color @Composable get() = LocalHailTonePalette.current.outline
+private val PrimaryPurple: Color @Composable get() = LocalHailTonePalette.current.bronze
+private val LightPurple: Color @Composable get() = LocalHailTonePalette.current.caramel
+private val OnlineGreen: Color @Composable get() = LocalHailTonePalette.current.online
+private val DeclineRed: Color @Composable get() = LocalHailTonePalette.current.danger
+private val MainText: Color @Composable get() = LocalHailTonePalette.current.text
+private val SecondaryText: Color @Composable get() = LocalHailTonePalette.current.muted
+private const val PermissionLogTag = "HailToneCallPermission"
 
 private fun AuthMessage.stringResourceId(): Int = when (this) {
     AuthMessage.CONFIRMATION_REQUIRED -> R.string.auth_confirmation_required
@@ -132,8 +135,12 @@ private fun AuthMessage.stringResourceId(): Int = when (this) {
 private enum class DemoScreen { SignIn, Contacts, Calls, Messages, Conversation, Settings, Profile, IncomingCall, ActiveCall }
 
 class MainActivity : AppCompatActivity() {
+    private val notificationActionState = androidx.compose.runtime.mutableStateOf<IncomingCallNotificationAction?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        IncomingCallNotificationManager.createChannel(this)
+        notificationActionState.value = IncomingCallNotificationManager.actionFromIntent(intent)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = android.graphics.Color.TRANSPARENT
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
@@ -141,12 +148,25 @@ class MainActivity : AppCompatActivity() {
             isAppearanceLightStatusBars = false
             isAppearanceLightNavigationBars = false
         }
-        setContent { PupsikCallApp() }
+        setContent {
+            HailToneApp(notificationActionState.value) { requestId ->
+                if (notificationActionState.value?.requestId == requestId) notificationActionState.value = null
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        notificationActionState.value = IncomingCallNotificationManager.actionFromIntent(intent)
     }
 }
 
 @Composable
-private fun PupsikCallApp() {
+private fun HailToneApp(
+    notificationAction: IncomingCallNotificationAction?,
+    onNotificationActionConsumed: (String) -> Unit,
+) {
     var screen by rememberSaveable { mutableStateOf(DemoScreen.SignIn) }
     var selectedConversationId by rememberSaveable { mutableStateOf<String?>(null) }
     var isMuted by rememberSaveable { mutableStateOf(false) }
@@ -173,6 +193,8 @@ private fun PupsikCallApp() {
     val autoAnswerController = remember { ForegroundAutoAnswerController(HandlerAutoAnswerScheduler()) }
     var answerAttemptedCallId by remember { mutableStateOf<UUID?>(null) }
     var pendingPermissionCallId by remember { mutableStateOf<UUID?>(null) }
+    var validatedNotificationAction by remember { mutableStateOf<IncomingCallNotificationAction?>(null) }
+    val notificationActionGate = remember { IncomingCallNotificationActionGate() }
     val deviceId = "authenticated-call"
     val languageCodes = stringArrayResource(R.array.supported_language_codes).toList()
     val languageNames = stringArrayResource(R.array.supported_language_names).toList()
@@ -240,6 +262,15 @@ private fun PupsikCallApp() {
                         }
                     }
                     if (currentCallId != session.callId.toString()) return
+                    if (session.calleeUserId == localUserId) {
+                        if (session.status == AuthenticatedCallStatus.RINGING &&
+                            !(appInForeground && screen == DemoScreen.IncomingCall)
+                        ) {
+                            IncomingCallNotificationManager.showCall(context, session.callId, session.callerUserId)
+                        } else {
+                            IncomingCallNotificationManager.cancel(context, session.callId)
+                        }
+                    }
                     if (session.status != AuthenticatedCallStatus.RINGING ||
                         activeCallSession?.callerUserId?.let { it != session.callerUserId } == true
                     ) {
@@ -267,6 +298,7 @@ private fun PupsikCallApp() {
                         engine?.startOffer()
                     }
                     if (session.status.isTerminal) {
+                        IncomingCallNotificationManager.cancel(context, session.callId)
                         if (pendingPermissionCallId == session.callId) pendingPermissionCallId = null
                         currentCallId = null
                         activeCallSession = null
@@ -282,6 +314,8 @@ private fun PupsikCallApp() {
                 }
 
                 override fun onAuthenticatedCallSessionLost() {
+                    currentCallId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+                        ?.let { IncomingCallNotificationManager.cancel(context, it) }
                     outgoingRingback.stop()
                     incomingRingtone.stop()
                     autoAnswerController.cancel()
@@ -336,8 +370,15 @@ private fun PupsikCallApp() {
         newSignaling
     }
     signalingRef = signaling
+    val contactDirectory = remember(signaling, context.applicationContext) {
+        HailToneContactDirectory(
+            backend = SupabaseHailToneContactDirectoryBackend(signaling.authClient),
+            associations = AndroidContactInviteAssociationStore(context.applicationContext),
+        )
+    }
     val authController = remember(signaling) { SupabaseAuthController(signaling.authClient) }
     val authState by authController.state.collectAsState()
+    val pushTokenRegistrar = remember(context.applicationContext) { DevicePushTokenRegistrar(context.applicationContext) }
     val appSettingsRepository = remember(context.applicationContext) { AppSettingsRepository(context.applicationContext) }
     val appSettingsState by appSettingsRepository.state.collectAsState()
     val appSettings = (appSettingsState as? AppSettingsState.Ready)?.settings ?: AppSettings()
@@ -353,11 +394,23 @@ private fun PupsikCallApp() {
     val messageListState by messagingRepository.messageState.collectAsState()
     val callHistoryRepository = remember(signaling) { CallHistoryRepository(signaling.authClient) }
     val callHistoryState by callHistoryRepository.state.collectAsState()
+
+    val logout: () -> Unit = {
+        authScope.launch {
+            try {
+                pushTokenRegistrar.unregisterCurrentInstallation(signaling)
+            } catch (_: Exception) {
+                // Sign-out still proceeds if push-token revocation is unavailable.
+            }
+            authController.logout()
+        }
+        Unit
+    }
     val selectedConversation = (conversationListState as? ConversationListState.Loaded)
         ?.conversations?.firstOrNull { it.id.toString() == selectedConversationId }
     val localizedAuthMessage = authState.message?.let { stringResource(it.stringResourceId()) }
 
-    val startAuthenticatedCall = fun(calleeUserId: UUID) {
+    val startAuthenticatedCall = fun(calleeUserId: UUID, verifiedDisplayName: String?) {
         authScope.launch {
             try {
                 val requestedCallId = UUID.randomUUID()
@@ -367,7 +420,7 @@ private fun PupsikCallApp() {
                 engine?.dispose("replaced by an authenticated call")
                 currentCallId = session.callId.toString()
                 activeCallSession = session
-                callParticipantName = defaultCallParticipantName
+                callParticipantName = verifiedDisplayName?.takeIf(String::isNotBlank) ?: defaultCallParticipantName
                 engine = createCallEngine(session)
                 engine?.setMuted(isMuted)
                 engine?.setSpeakerEnabled(speakerEnabled)
@@ -468,6 +521,7 @@ private fun PupsikCallApp() {
         ) return
         if (answerAttemptedCallId == activeSession.callId) return
         answerAttemptedCallId = activeSession.callId
+        IncomingCallNotificationManager.cancel(context, activeSession.callId)
         pendingPermissionCallId = activeSession.callId
         autoAnswerController.onManualAction(activeSession.callId, ManualCallAction.ANSWERED)
         incomingRingtone.stopForCall(activeSession.callId)
@@ -484,6 +538,7 @@ private fun PupsikCallApp() {
 
     val handleDecline = fun() {
         val activeSession = activeCallSession ?: return
+        IncomingCallNotificationManager.cancel(context, activeSession.callId)
         autoAnswerController.onManualAction(activeSession.callId, ManualCallAction.DECLINED)
         incomingRingtone.stopForCall(activeSession.callId)
         pendingPermissionCallId = null
@@ -520,6 +575,12 @@ private fun PupsikCallApp() {
         screen = DemoScreen.Contacts
     }
 
+    val latestNotificationSession by rememberUpdatedState(activeCallSession)
+    val latestNotificationCallId by rememberUpdatedState(currentCallId)
+    val latestNotificationScreen by rememberUpdatedState(screen)
+    val latestNotificationAuthPhase by rememberUpdatedState(authState.phase)
+    val latestNotificationUserId by rememberUpdatedState(signaling.authenticatedUserId())
+
     DisposableEffect(engine) {
         val activeEngine = engine
         onDispose { activeEngine?.dispose() }
@@ -534,6 +595,15 @@ private fun PupsikCallApp() {
                     outgoingRingback.stop()
                     incomingRingtone.stop()
                     autoAnswerController.cancel()
+                    val session = latestNotificationSession
+                    if (latestNotificationAuthPhase == AuthPhase.AUTHENTICATED &&
+                        latestNotificationScreen == DemoScreen.IncomingCall &&
+                        latestNotificationCallId == session?.callId?.toString() &&
+                        session?.status == AuthenticatedCallStatus.RINGING &&
+                        session.calleeUserId == latestNotificationUserId
+                    ) {
+                        IncomingCallNotificationManager.showCall(context, session.callId, session.callerUserId)
+                    }
                 }
                 else -> Unit
             }
@@ -608,11 +678,23 @@ private fun PupsikCallApp() {
         }
     }
 
+    LaunchedEffect(authState.phase, signaling, pushTokenRegistrar) {
+        if (authState.phase == AuthPhase.AUTHENTICATED) {
+            try {
+                pushTokenRegistrar.registerCurrentToken(signaling)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Missing Firebase configuration or token registration must not affect sign-in/calling.
+            }
+        }
+    }
+
     val activeSession = activeCallSession
     val authenticatedLocalUserId = signaling.authenticatedUserId()
     val activeIncomingRoute = activeSession?.takeIf {
         screen == DemoScreen.IncomingCall && currentCallId == it.callId.toString() && appInForeground &&
-            authState.phase == AuthPhase.AUTHENTICATED
+            authState.phase == AuthPhase.AUTHENTICATED && notificationAction == null && validatedNotificationAction == null
     }?.let { incomingCallRoute(authenticatedLocalUserId, it) }
     val autoAnswerInput = AutoAnswerPolicyInput(
         featureEnabled = appSettings.autoAnswerEnabled,
@@ -642,13 +724,21 @@ private fun PupsikCallApp() {
             foreground = appInForeground && screen == DemoScreen.IncomingCall &&
                 activeSession?.callId?.let { answerAttemptedCallId != it } == true,
         )
+        if (activeSession?.status == AuthenticatedCallStatus.RINGING &&
+            activeSession.calleeUserId == authenticatedLocalUserId && currentCallId == activeSession.callId.toString()
+        ) {
+            if (appInForeground && screen == DemoScreen.IncomingCall) {
+                IncomingCallNotificationManager.cancel(context, activeSession.callId)
+            } else {
+                IncomingCallNotificationManager.showCall(context, activeSession.callId, activeSession.callerUserId)
+            }
+        }
         autoAnswerController.update(activeIncomingRoute?.session?.callId, autoAnswerInput) {
             if (screen == DemoScreen.IncomingCall && currentCallId == activeIncomingRoute?.session?.callId?.toString() &&
                 activeCallSession?.status == AuthenticatedCallStatus.RINGING
             ) handleAnswer()
         }
     }
-
     BackHandler(enabled = authState.phase == AuthPhase.AUTHENTICATED && screen != DemoScreen.SignIn) {
         when (screen) {
             DemoScreen.ActiveCall -> endCall()
@@ -660,8 +750,56 @@ private fun PupsikCallApp() {
         }
     }
 
-    PupsikTheme(appearanceMode) {
-        val palette = LocalPupsikPalette.current
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
+    LaunchedEffect(authState.phase) {
+        if (authState.phase == AuthPhase.AUTHENTICATED && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    LaunchedEffect(notificationAction?.requestId, authState.phase) {
+        val action = notificationAction ?: return@LaunchedEffect
+        if (authState.phase != AuthPhase.AUTHENTICATED) return@LaunchedEffect
+        autoAnswerController.onManualAction(
+            action.callId,
+            if (action.kind == IncomingCallNotificationActionKind.ANSWER) ManualCallAction.ANSWERED
+            else ManualCallAction.DECLINED,
+        )
+        val invitations = runCatching { signaling.refreshPendingInvitations() }.getOrNull()
+        if (invitations == null) {
+            onNotificationActionConsumed(action.requestId)
+            return@LaunchedEffect
+        }
+        if (validateIncomingCallNotificationAction(action, invitations, signaling.authenticatedUserId()) == null) {
+            IncomingCallNotificationManager.cancel(context, action.callId)
+            onNotificationActionConsumed(action.requestId)
+            return@LaunchedEffect
+        }
+        if (!notificationActionGate.claim(action)) {
+            onNotificationActionConsumed(action.requestId)
+            return@LaunchedEffect
+        }
+        validatedNotificationAction = action
+    }
+
+    LaunchedEffect(validatedNotificationAction, currentCallId, activeCallSession, screen) {
+        val action = validatedNotificationAction ?: return@LaunchedEffect
+        val session = activeCallSession
+        if (screen != DemoScreen.IncomingCall || currentCallId != action.callId.toString() ||
+            session?.callId != action.callId || session.callerUserId != action.callerUserId ||
+            session.status != AuthenticatedCallStatus.RINGING
+        ) return@LaunchedEffect
+        validatedNotificationAction = null
+        onNotificationActionConsumed(action.requestId)
+        IncomingCallNotificationManager.cancel(context, action.callId)
+        dispatchIncomingCallNotificationAction(action.kind, handleAnswer, handleDecline)
+    }
+
+    HailToneTheme(appearanceMode) {
+        val palette = LocalHailTonePalette.current
         val darkAppearance = when (appearanceMode) {
             AppearanceMode.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme()
             AppearanceMode.LIGHT -> false
@@ -696,15 +834,40 @@ private fun PupsikCallApp() {
                     onRegister = { email, password -> authScope.launch { authController.register(email, password) } },
                 )
                 else -> when (screen) {
-                    DemoScreen.SignIn, DemoScreen.Contacts -> PupsikContactsScreen(
+                    DemoScreen.SignIn, DemoScreen.Contacts -> HailToneContactsScreen(
                         profileName = (profileState as? AuthenticatedProfileState.Profile)
                             ?.profile?.displayName.orEmpty(),
                         onOpenCalls = { screen = DemoScreen.Calls },
                         onOpenMessages = { screen = DemoScreen.Messages },
                         onOpenSettings = { screen = DemoScreen.Settings },
                         onOpenProfile = { screen = DemoScreen.Profile },
+                        identityMatcher = contactDirectory,
+                        onCreateInvite = contactDirectory::createInviteFor,
+                        onAcceptInvite = contactDirectory::acceptInviteFor,
+                        onLoadBlockedContacts = contactDirectory::listBlockedContacts,
+                        onBlockContact = contactDirectory::blockResolvedContact,
+                        onUnblockContact = contactDirectory::unblockResolvedContact,
+                        onCallContact = { userId, verifiedName -> startAuthenticatedCall(userId, verifiedName) },
+                        onMessageContact = { userId ->
+                            authScope.launch {
+                                val conversationId = messagingRepository.createOrGetDirectConversation(userId)
+                                if (conversationId != null) {
+                                    messagingRepository.loadConversations()
+                                    val conversation = (messagingRepository.conversationState.value as? ConversationListState.Loaded)
+                                        ?.conversations?.firstOrNull { it.id == conversationId }
+                                    if (conversation != null) {
+                                        selectedConversationId = conversationId.toString()
+                                        screen = DemoScreen.Conversation
+                                    } else {
+                                        screen = DemoScreen.Messages
+                                    }
+                                } else {
+                                    screen = DemoScreen.Messages
+                                }
+                            }
+                        },
                     )
-                    DemoScreen.Calls -> PupsikCallsScreen(
+                    DemoScreen.Calls -> HailToneCallsScreen(
                         state = callHistoryState,
                         onRetry = { authScope.launch { callHistoryRepository.loadHistory() } },
                         onLoadMore = {
@@ -714,7 +877,7 @@ private fun PupsikCallApp() {
                         onOpenContacts = { screen = DemoScreen.Contacts },
                         onOpenMessages = { screen = DemoScreen.Messages },
                     )
-                    DemoScreen.Messages -> PupsikMessagesScreen(
+                    DemoScreen.Messages -> HailToneMessagesScreen(
                         state = conversationListState,
                         onRetry = { authScope.launch { messagingRepository.loadConversations() } },
                         onLoadMore = {
@@ -729,7 +892,7 @@ private fun PupsikCallApp() {
                         onOpenCalls = { screen = DemoScreen.Calls },
                     )
                     DemoScreen.Conversation -> selectedConversation?.let { conversation ->
-                        PupsikConversationScreen(
+                        HailToneConversationScreen(
                             conversation = conversation,
                             state = messageListState,
                             onBack = { screen = DemoScreen.Messages },
@@ -746,7 +909,7 @@ private fun PupsikCallApp() {
                                 messagingRepository.sendTextMessage(conversationId, clientMessageId, body)
                             },
                         )
-                    } ?: PupsikMessagesScreen(
+                    } ?: HailToneMessagesScreen(
                         state = conversationListState,
                         onRetry = { authScope.launch { messagingRepository.loadConversations() } },
                         onLoadMore = {
@@ -760,7 +923,7 @@ private fun PupsikCallApp() {
                         onOpenContacts = { screen = DemoScreen.Contacts },
                         onOpenCalls = { screen = DemoScreen.Calls },
                     )
-                    DemoScreen.Settings -> PupsikSettingsScreen(
+                    DemoScreen.Settings -> HailToneSettingsScreen(
                         settingsState = appSettingsState,
                         profileState = profileState,
                         onAppearanceChange = { mode -> authScope.launch { appSettingsRepository.setAppearance(mode) } },
@@ -772,13 +935,13 @@ private fun PupsikCallApp() {
                         selectedLanguageIndex = selectedLanguageIndex,
                         onLanguageSelected = ::applyApplicationLanguage,
                         onOpenProfile = { screen = DemoScreen.Profile },
-                        onLogout = { authScope.launch { authController.logout() } },
+                        onLogout = logout,
                     )
-                    DemoScreen.Profile -> PupsikProfileScreen(
+                    DemoScreen.Profile -> HailToneProfileScreen(
                         state = profileState,
                         phoneState = phoneVerificationState,
                         onBack = { screen = DemoScreen.Settings },
-                        onLogout = { authScope.launch { authController.logout() } },
+                        onLogout = logout,
                         onRetry = profileRepository::reload,
                         onSaveDisplayName = { name -> profileRepository.updateDisplayName(name) },
                         onLoadPhone = phoneVerificationController::load,
@@ -786,13 +949,13 @@ private fun PupsikCallApp() {
                         onResendPhone = phoneVerificationController::resendVerification,
                         onVerifyPhone = phoneVerificationController::verify,
                     )
-                    DemoScreen.IncomingCall -> PupsikIncomingCallScreen(
+                    DemoScreen.IncomingCall -> HailToneIncomingCallScreen(
                         peerName = callParticipantName.ifBlank { defaultCallParticipantName },
                         errorMessage = callError.takeIf { BuildConfig.DEBUG },
                         onDecline = handleDecline,
                         onAnswer = handleAnswer,
                     )
-                    DemoScreen.ActiveCall -> PupsikActiveCallScreen(
+                    DemoScreen.ActiveCall -> HailToneActiveCallScreen(
                         peerName = callParticipantName.ifBlank { defaultCallParticipantName },
                         isMuted = isMuted,
                         speakerEnabled = speakerEnabled,
@@ -843,8 +1006,8 @@ private fun SignInScreen(
     var email by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     val busy = state.isBusy
-    val palette = LocalPupsikPalette.current
-    val lightUi = palette == PupsikPalettes.Light
+    val palette = LocalHailTonePalette.current
+    val lightUi = palette == HailTonePalettes.Light
 
     Column(
         modifier = Modifier
@@ -866,8 +1029,8 @@ private fun SignInScreen(
         Spacer(Modifier.height(10.dp))
         Column(
             Modifier.fillMaxWidth()
-                .then(if (lightUi) Modifier.clip(PupsikShapes.panel).background(palette.surfaceRaised).border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.panel) else Modifier)
-                .padding(if (lightUi) PupsikSpacing.medium else 0.dp),
+                .then(if (lightUi) Modifier.clip(HailToneShapes.panel).background(palette.surfaceRaised).border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.panel) else Modifier)
+                .padding(if (lightUi) HailToneSpacing.medium else 0.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             LanguageSelector(languageCodes, languageNames, selectedLanguageIndex, onLanguageSelected)
@@ -880,7 +1043,7 @@ private fun SignInScreen(
                 placeholder = { Text(stringResource(R.string.email), fontSize = 15.sp) },
                 leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(21.dp)) },
                 singleLine = true,
-                shape = PupsikShapes.panel,
+                shape = HailToneShapes.panel,
                 colors = signInFieldColors(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
             )
@@ -894,7 +1057,7 @@ private fun SignInScreen(
                 leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(21.dp)) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
-                shape = PupsikShapes.panel,
+                shape = HailToneShapes.panel,
                 colors = signInFieldColors(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             )
@@ -915,7 +1078,7 @@ private fun SignInScreen(
                     if (registering) onRegister(email, submittedPassword) else onSignIn(email, submittedPassword)
                 },
                 modifier = Modifier.fillMaxWidth().height(58.dp),
-                shape = PupsikShapes.panel,
+                shape = HailToneShapes.panel,
                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryPurple),
             ) {
                 if (busy) {
@@ -1022,7 +1185,7 @@ private fun BrandMark() {
 
 @Composable
 private fun ProfileAvatar(initial: String, size: Dp, isOnline: Boolean) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     Box(
         modifier = Modifier
             .size(size)
@@ -1077,7 +1240,7 @@ private fun BottomNavigationItem(
 
 @Composable
 private fun IncomingCallScreen(peerName: String, errorMessage: String?, onDecline: () -> Unit, onAnswer: () -> Unit) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1164,7 +1327,7 @@ private fun ActiveCallScreen(
     onToggleSpeaker: () -> Unit,
     onEndCall: () -> Unit,
 ) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 8.dp)) {
         IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back), tint = MainText, modifier = Modifier.size(24.dp))
@@ -1230,7 +1393,7 @@ private fun CallControl(
     onClick: () -> Unit,
     icon: @Composable () -> Unit,
 ) {
-    val controlColor = if (selected) PrimaryPurple else LocalPupsikPalette.current.surfaceRaised
+    val controlColor = if (selected) PrimaryPurple else LocalHailTonePalette.current.surfaceRaised
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         IconButton(
             onClick = onClick,

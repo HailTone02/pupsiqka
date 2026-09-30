@@ -1,5 +1,5 @@
 {
-  "name": "PupsikCall Android",
+  "name": "HailTone Android",
   "features": {
     "ghcr.io/devcontainers/features/java:1": {
       "version": "21"

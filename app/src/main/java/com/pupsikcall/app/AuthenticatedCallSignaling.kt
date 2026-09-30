@@ -25,16 +25,55 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.util.UUID
+import java.net.URI
 import java.util.concurrent.ConcurrentHashMap
+
+internal fun isValidSupabaseClientConfiguration(url: String, key: String): Boolean {
+    val parsedUrl = runCatching { URI(url) }.getOrNull() ?: return false
+    val validUrl = parsedUrl.scheme.equals("https", ignoreCase = true) &&
+        !parsedUrl.host.isNullOrBlank() && parsedUrl.userInfo == null &&
+        parsedUrl.query == null && parsedUrl.fragment == null
+    val validPublishableKey = key.matches(Regex("sb_publishable_[A-Za-z0-9_-]+"))
+    val legacyRole = key.split('.').takeIf { it.size == 3 }?.get(1)
+        ?.let(::decodeBase64Url)
+        ?.let { runCatching { Json.parseToJsonElement(it).jsonObject["role"]?.jsonPrimitive?.content }.getOrNull() }
+    val validLegacyAnonKey = legacyRole == "anon"
+    return validUrl && (validPublishableKey || validLegacyAnonKey)
+}
+
+private fun decodeBase64Url(value: String): String? {
+    val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    val bytes = ByteArray(value.length * 3 / 4 + 3)
+    var accumulator = 0
+    var bitCount = 0
+    var byteCount = 0
+    for (character in value) {
+        val digit = alphabet.indexOf(character)
+        if (digit < 0) return null
+        accumulator = (accumulator shl 6) or digit
+        bitCount += 6
+        if (bitCount >= 8) {
+            bitCount -= 8
+            bytes[byteCount++] = (accumulator shr bitCount).toByte()
+        }
+    }
+    return bytes.copyOf(byteCount).toString(Charsets.UTF_8)
+}
 
 internal class AuthenticatedCallSignaling(
     supabaseUrl: String,
@@ -73,6 +112,7 @@ internal class AuthenticatedCallSignaling(
     private val callChannels = ConcurrentHashMap<UUID, CallChannel>()
     private val inboxGeneration = Any()
     @Volatile private var localUserId: UUID? = null
+    private val authenticatedUserState = MutableStateFlow<UUID?>(null)
     @Volatile private var inboxChannel: RealtimeChannel? = null
     @Volatile private var closed = false
 
@@ -85,6 +125,17 @@ internal class AuthenticatedCallSignaling(
     }
 
     fun authenticatedUserId(): UUID? = localUserId
+
+    suspend fun awaitAuthenticatedUserId(): UUID? {
+        val configuredClient = client ?: return null
+        val status = configuredClient.auth.sessionStatus.first { it != SessionStatus.Initializing }
+        val expectedUserId = (status as? SessionStatus.Authenticated)
+            ?.let { authenticatedCallUserId(it.session.user?.id) }
+            ?: return null
+        return withTimeoutOrNull(10_000) {
+            authenticatedUserState.filterNotNull().first { it == expectedUserId }
+        }
+    }
 
     suspend fun createCallSession(callId: UUID, calleeUserId: UUID): AuthenticatedCallSession {
         val authenticatedUserId = requireAuthenticatedUser()
@@ -185,6 +236,38 @@ internal class AuthenticatedCallSignaling(
             .filter { it.calleeUserId == userId && it.status == AuthenticatedCallStatus.RINGING }
     }
 
+    suspend fun registerCallPushToken(installationId: UUID, token: String) {
+        val userId = requireAuthenticatedUser()
+        if (token.length !in 20..4096 || token != token.trim() || token.any(Char::isISOControl)) {
+            throw IllegalArgumentException("Invalid push token")
+        }
+        requireClient().postgrest.rpc(
+            "register_call_push_token",
+            buildJsonObject {
+                put("p_installation_id", JsonPrimitive(installationId.toString()))
+                put("p_fcm_token", JsonPrimitive(token))
+            },
+        )
+        ensureSameUser(userId)
+    }
+
+    suspend fun unregisterCallPushToken(installationId: UUID) {
+        val userId = requireAuthenticatedUser()
+        requireClient().postgrest.rpc(
+            "unregister_call_push_token",
+            buildJsonObject { put("p_installation_id", JsonPrimitive(installationId.toString())) },
+        )
+        ensureSameUser(userId)
+    }
+
+    suspend fun refreshPendingInvitations(): List<AuthenticatedCallSession> {
+        val userId = requireAuthenticatedUser()
+        val invitations = loadPendingInvitations()
+        ensureSameUser(userId)
+        invitations.forEach { dispatchCallSession(it, userId) }
+        return invitations
+    }
+
     suspend fun loadPublicDisplayName(userId: UUID): String? {
         val localId = requireAuthenticatedUser()
         val row = requireClient().postgrest.rpc(
@@ -232,10 +315,12 @@ internal class AuthenticatedCallSignaling(
                 if (nextUserId == null) {
                     if (previousUserId != null) clearAuthenticatedChannels()
                     localUserId = null
+                    authenticatedUserState.value = null
                     listener.onAuthenticatedCallSessionLost()
                 } else if (previousUserId != nextUserId) {
                     clearAuthenticatedChannels()
                     localUserId = nextUserId
+                    authenticatedUserState.value = nextUserId
                     subscribeToUserInbox(supabase, nextUserId)
                 }
             }
@@ -378,7 +463,7 @@ internal class AuthenticatedCallSignaling(
         client ?: throw IllegalStateException("Authenticated call routing is unavailable")
 
     private fun createSupabaseClientIfConfigured(url: String, key: String): SupabaseClient? =
-        if (url.isBlank() || key.isBlank()) {
+        if (!isValidSupabaseClientConfiguration(url, key)) {
             null
         } else {
             createSupabaseClient(url, key) {

@@ -52,7 +52,7 @@ class SupabaseCallSignaling(
         const val SIGNALING_CHANNEL = "pupsikcall-signaling"
         const val PRESENCE_CHANNEL = "pupsikcall-presence"
         const val SIGNAL_EVENT_NAME = "signal"
-        const val TAG = "PupsikCallSignal"
+        const val TAG = "HailToneCallSignal"
     }
 
     private data class ChannelSession(

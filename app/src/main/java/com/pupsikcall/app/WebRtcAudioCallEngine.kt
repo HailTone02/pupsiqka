@@ -60,7 +60,7 @@ class WebRtcAudioCallEngine(
     }
 
     companion object {
-        private const val TAG = "PupsikCallWebRTC"
+        private const val TAG = "HailToneCallWebRTC"
         private val initializationLock = Any()
 
         @Volatile
@@ -313,11 +313,11 @@ class WebRtcAudioCallEngine(
 
         setupStage = "peerconnection-creation"
         val configuration = createWebRtcRtcConfiguration(
-            turnUrls = BuildConfig.PUPSIKCALL_TURN_URL,
-            turnUsername = BuildConfig.PUPSIKCALL_TURN_USERNAME,
-            turnCredential = BuildConfig.PUPSIKCALL_TURN_CREDENTIAL,
+            turnUrls = BuildConfig.HAILTONE_TURN_URL,
+            turnUsername = BuildConfig.HAILTONE_TURN_USERNAME,
+            turnCredential = BuildConfig.HAILTONE_TURN_CREDENTIAL,
             debugBuild = BuildConfig.DEBUG,
-            forceRelay = BuildConfig.PUPSIKCALL_DEBUG_FORCE_RELAY,
+            forceRelay = BuildConfig.HAILTONE_DEBUG_FORCE_RELAY,
         )
         val connection = peerFactory.createPeerConnection(configuration, peerConnectionObserver())
             ?: error("Unable to create peer connection")

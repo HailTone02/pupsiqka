@@ -50,7 +50,7 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 
 @Composable
-internal fun PupsikMessagesScreen(
+internal fun HailToneMessagesScreen(
     state: ConversationListState,
     onRetry: () -> Unit,
     onLoadMore: () -> Unit,
@@ -58,18 +58,18 @@ internal fun PupsikMessagesScreen(
     onOpenContacts: () -> Unit,
     onOpenCalls: () -> Unit,
 ) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     Column(Modifier.fillMaxSize().background(palette.background)) {
         ScreenHeader(stringResource(R.string.messages))
         when (val currentState = state) {
             ConversationListState.Loading -> CenteredMessageState {
                 CircularProgressIndicator(color = palette.bronze)
-                Spacer(Modifier.height(PupsikSpacing.medium))
+                Spacer(Modifier.height(HailToneSpacing.medium))
                 Text(stringResource(R.string.messages_loading), color = palette.muted)
             }
             ConversationListState.Empty -> CenteredMessageState {
                 Icon(Icons.Filled.Email, contentDescription = null, tint = palette.muted, modifier = Modifier.size(34.dp))
-                Spacer(Modifier.height(PupsikSpacing.medium))
+                Spacer(Modifier.height(HailToneSpacing.medium))
                 Text(stringResource(R.string.messages_empty_conversations), color = palette.muted, style = MaterialTheme.typography.bodyLarge)
             }
             ConversationListState.SignedOut -> CenteredMessageState {
@@ -81,8 +81,8 @@ internal fun PupsikMessagesScreen(
             }
             is ConversationListState.Loaded -> {
                 LazyColumn(
-                    Modifier.weight(1f).fillMaxWidth().padding(horizontal = PupsikSpacing.medium),
-                    verticalArrangement = Arrangement.spacedBy(PupsikSpacing.small),
+                    Modifier.weight(1f).fillMaxWidth().padding(horizontal = HailToneSpacing.medium),
+                    verticalArrangement = Arrangement.spacedBy(HailToneSpacing.small),
                 ) {
                     items(currentState.conversations, key = { it.id }) { conversation ->
                         ConversationRow(conversation, onClick = { onOpenConversation(conversation) })
@@ -98,12 +98,12 @@ internal fun PupsikMessagesScreen(
                 }
             }
         }
-        PupsikBottomNavigation("messages", onOpenContacts, onOpenCalls, {})
+        HailToneBottomNavigation("messages", onOpenContacts, onOpenCalls, {})
     }
 }
 
 @Composable
-internal fun PupsikConversationScreen(
+internal fun HailToneConversationScreen(
     conversation: MessageConversation,
     state: MessageListState,
     onBack: () -> Unit,
@@ -112,7 +112,7 @@ internal fun PupsikConversationScreen(
     onLoadOlder: () -> Unit,
     onSend: suspend (UUID, UUID, String) -> MessageSendResult,
 ) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     val scope = rememberCoroutineScope()
     var draft by remember(conversation.id) { mutableStateOf("") }
     var pendingClientMessageId by remember(conversation.id) { mutableStateOf<UUID?>(null) }
@@ -121,7 +121,7 @@ internal fun PupsikConversationScreen(
 
     Column(Modifier.fillMaxSize().background(palette.background)) {
         Row(
-            Modifier.fillMaxWidth().height(64.dp).padding(horizontal = PupsikSpacing.small),
+            Modifier.fillMaxWidth().height(64.dp).padding(horizontal = HailToneSpacing.small),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
@@ -132,14 +132,14 @@ internal fun PupsikConversationScreen(
                 conversation.displayName ?: stringResource(R.string.conversation),
                 color = palette.text,
                 style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(start = PupsikSpacing.small),
+                modifier = Modifier.padding(start = HailToneSpacing.small),
             )
         }
 
         when (val currentState = state) {
             MessageListState.Loading -> CenteredMessageState {
                 CircularProgressIndicator(color = palette.bronze)
-                Spacer(Modifier.height(PupsikSpacing.medium))
+                Spacer(Modifier.height(HailToneSpacing.medium))
                 Text(stringResource(R.string.messages_loading), color = palette.muted)
             }
             MessageListState.Empty -> CenteredMessageState {
@@ -168,8 +168,8 @@ internal fun PupsikConversationScreen(
                     CenteredMessageState { Text(stringResource(R.string.no_messages), color = palette.muted) }
                 } else {
                     LazyColumn(
-                        Modifier.weight(1f).fillMaxWidth().padding(horizontal = PupsikSpacing.medium),
-                        verticalArrangement = Arrangement.spacedBy(PupsikSpacing.small),
+                        Modifier.weight(1f).fillMaxWidth().padding(horizontal = HailToneSpacing.medium),
+                        verticalArrangement = Arrangement.spacedBy(HailToneSpacing.small),
                     ) {
                         items(currentState.messages, key = { it.id }) { message ->
                             MessageBubble(message.body)
@@ -180,7 +180,7 @@ internal fun PupsikConversationScreen(
         }
 
         if (state !is MessageListState.SignedOut) {
-            Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = PupsikSpacing.medium, vertical = PupsikSpacing.small)) {
+            Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = HailToneSpacing.medium, vertical = HailToneSpacing.small)) {
                 if (sendFailed) {
                     Text(stringResource(R.string.message_send_failed), color = palette.danger, style = MaterialTheme.typography.bodySmall)
                 }
@@ -196,7 +196,7 @@ internal fun PupsikConversationScreen(
                         modifier = Modifier.weight(1f),
                         enabled = !sending,
                         placeholder = { Text(stringResource(R.string.message_hint)) },
-                        shape = PupsikShapes.capsule,
+                        shape = HailToneShapes.capsule,
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                         keyboardActions = KeyboardActions(onSend = { submitMessage(draft, conversation.id, pendingClientMessageId, { pendingClientMessageId = it }, { draft = it }, { sending = it }, { sendFailed = it }, onSend, scope) }),
@@ -222,22 +222,22 @@ internal fun PupsikConversationScreen(
 
 @Composable
 private fun ConversationRow(conversation: MessageConversation, onClick: () -> Unit) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     val title = conversation.displayName ?: stringResource(R.string.conversation)
     Row(
-        Modifier.fillMaxWidth().clip(PupsikShapes.panel).background(palette.surfaceRaised)
-            .then(if (palette == PupsikPalettes.Light) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.panel) else Modifier)
-            .clickable(onClick = onClick).padding(PupsikSpacing.medium),
+        Modifier.fillMaxWidth().clip(HailToneShapes.panel).background(palette.surfaceRaised)
+            .then(if (palette == HailTonePalettes.Light) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.panel) else Modifier)
+            .clickable(onClick = onClick).padding(HailToneSpacing.medium),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ConversationAvatar(title)
-        Text(title, color = palette.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = PupsikSpacing.medium))
+        Text(title, color = palette.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = HailToneSpacing.medium))
     }
 }
 
 @Composable
 private fun ConversationAvatar(name: String) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     Box(
         Modifier.size(48.dp).clip(CircleShape).background(palette.surface)
             .border(1.dp, palette.outline, CircleShape),
@@ -249,22 +249,22 @@ private fun ConversationAvatar(name: String) {
 
 @Composable
 private fun MessageBubble(body: String) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     Text(
         body,
         color = palette.text,
         style = MaterialTheme.typography.bodyMedium,
-        modifier = Modifier.fillMaxWidth().clip(PupsikShapes.panel)
-            .background(if (palette == PupsikPalettes.Light) palette.surfaceRaised else palette.surface)
-            .then(if (palette == PupsikPalettes.Light) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.panel) else Modifier)
-            .padding(horizontal = PupsikSpacing.medium, vertical = PupsikSpacing.small),
+        modifier = Modifier.fillMaxWidth().clip(HailToneShapes.panel)
+            .background(if (palette == HailTonePalettes.Light) palette.surfaceRaised else palette.surface)
+            .then(if (palette == HailTonePalettes.Light) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.panel) else Modifier)
+            .padding(horizontal = HailToneSpacing.medium, vertical = HailToneSpacing.small),
     )
 }
 
 @Composable
 private fun ColumnScope.CenteredMessageState(content: @Composable () -> Unit) {
     Column(
-        Modifier.fillMaxWidth().weight(1f).padding(PupsikSpacing.large),
+        Modifier.fillMaxWidth().weight(1f).padding(HailToneSpacing.large),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

@@ -10,6 +10,25 @@ select user_b, user_b::text || '@messaging-test.invalid' from messaging_test_ids
 union all
 select user_c, user_c::text || '@messaging-test.invalid' from messaging_test_ids;
 
+do $$
+declare
+    user_a uuid;
+    user_b uuid;
+    invite_id uuid := gen_random_uuid();
+    fixture_token text := encode(extensions.gen_random_bytes(32), 'hex');
+begin
+    select messaging_test_ids.user_a, messaging_test_ids.user_b into user_a, user_b from messaging_test_ids;
+    insert into public.hailtone_contact_invites (
+        id, token_hash, inviter_user_id, accepted_by_user_id, expires_at, accepted_at
+    ) values (
+        invite_id, extensions.digest(convert_to(fixture_token, 'UTF8'), 'sha256'),
+        user_a, user_b, now() + interval '1 day', now()
+    );
+    insert into public.hailtone_contact_links (owner_user_id, contact_user_id, invitation_id)
+    values (user_a, user_b, invite_id), (user_b, user_a, invite_id);
+end;
+$$;
+
 select set_config('test.messaging.user_a', user_a::text, true),
        set_config('test.messaging.user_b', user_b::text, true),
        set_config('test.messaging.user_c', user_c::text, true)

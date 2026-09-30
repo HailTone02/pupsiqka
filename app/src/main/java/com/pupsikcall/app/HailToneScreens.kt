@@ -87,25 +87,25 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @Composable
-internal fun PupsikCallsScreen(
+internal fun HailToneCallsScreen(
     state: CallHistoryState,
     onRetry: () -> Unit,
     onLoadMore: () -> Unit,
     onOpenContacts: () -> Unit,
     onOpenMessages: () -> Unit,
 ) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     Column(Modifier.fillMaxSize().background(palette.background)) {
         ScreenHeader(stringResource(R.string.calls))
         when (val currentState = state) {
             CallHistoryState.Loading -> CallHistoryMessageState {
                 CircularProgressIndicator(color = palette.bronze)
-                Spacer(Modifier.height(PupsikSpacing.medium))
+                Spacer(Modifier.height(HailToneSpacing.medium))
                 Text(stringResource(R.string.call_history_loading), color = palette.muted)
             }
             CallHistoryState.Empty -> CallHistoryMessageState {
                 Icon(Icons.Filled.Call, contentDescription = null, tint = palette.muted, modifier = Modifier.size(34.dp))
-                Spacer(Modifier.height(PupsikSpacing.medium))
+                Spacer(Modifier.height(HailToneSpacing.medium))
                 Text(stringResource(R.string.no_recent_calls), color = palette.muted, style = MaterialTheme.typography.bodyLarge)
             }
             CallHistoryState.SignedOut -> CallHistoryMessageState {
@@ -119,8 +119,8 @@ internal fun PupsikCallsScreen(
             }
             is CallHistoryState.Loaded -> {
                 LazyColumn(
-                    Modifier.weight(1f).fillMaxWidth().padding(horizontal = PupsikSpacing.medium),
-                    verticalArrangement = Arrangement.spacedBy(PupsikSpacing.small),
+                    Modifier.weight(1f).fillMaxWidth().padding(horizontal = HailToneSpacing.medium),
+                    verticalArrangement = Arrangement.spacedBy(HailToneSpacing.small),
                 ) {
                     items(currentState.calls, key = { it.callId }) { call ->
                         CallHistoryRow(call)
@@ -139,14 +139,14 @@ internal fun PupsikCallsScreen(
                 }
             }
         }
-        PupsikBottomNavigation("calls", onOpenContacts, {}, onOpenMessages)
+        HailToneBottomNavigation("calls", onOpenContacts, {}, onOpenMessages)
     }
 }
 
 @Composable
 private fun ColumnScope.CallHistoryMessageState(content: @Composable ColumnScope.() -> Unit) {
     Column(
-        Modifier.weight(1f).fillMaxWidth().padding(horizontal = PupsikSpacing.medium),
+        Modifier.weight(1f).fillMaxWidth().padding(horizontal = HailToneSpacing.medium),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
         content = content,
@@ -155,20 +155,20 @@ private fun ColumnScope.CallHistoryMessageState(content: @Composable ColumnScope
 
 @Composable
 private fun CallHistoryRow(call: CallHistoryRecord) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     val directionLabel = stringResource(
         if (call.direction == CallHistoryDirection.Incoming) R.string.call_history_incoming else R.string.call_history_outgoing,
     )
     val counterpartName = call.counterpartDisplayName?.takeIf(String::isNotBlank)
         ?: call.counterpartUserId.toString()
     Row(
-        Modifier.fillMaxWidth().clip(PupsikShapes.panel).background(palette.surfaceRaised)
-            .then(if (palette == PupsikPalettes.Light) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.panel) else Modifier)
-            .padding(PupsikSpacing.medium),
+        Modifier.fillMaxWidth().clip(HailToneShapes.panel).background(palette.surfaceRaised)
+            .then(if (palette == HailTonePalettes.Light) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.panel) else Modifier)
+            .padding(HailToneSpacing.medium),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Filled.Call, contentDescription = null, tint = palette.bronze, modifier = Modifier.size(22.dp))
-        Column(Modifier.weight(1f).padding(start = PupsikSpacing.medium)) {
+        Column(Modifier.weight(1f).padding(start = HailToneSpacing.medium)) {
             Text(counterpartName, color = palette.text, style = MaterialTheme.typography.titleMedium)
             Text(
                 "$directionLabel - ${stringResource(call.status.historyLabelResource())}",
@@ -201,7 +201,7 @@ private fun formatCallDuration(durationSeconds: Long): String {
 }
 
 @Composable
-internal fun PupsikSettingsScreen(
+internal fun HailToneSettingsScreen(
     settingsState: AppSettingsState,
     profileState: AuthenticatedProfileState,
     onAppearanceChange: (AppearanceMode) -> Unit,
@@ -215,20 +215,20 @@ internal fun PupsikSettingsScreen(
     onOpenProfile: () -> Unit,
     onLogout: () -> Unit,
 ) {
-    val palette = LocalPupsikPalette.current
-    val lightUi = palette == PupsikPalettes.Light
+    val palette = LocalHailTonePalette.current
+    val lightUi = palette == HailTonePalettes.Light
     val settings = (settingsState as? AppSettingsState.Ready)?.settings
     val appearance = settings?.appearance ?: AppearanceMode.SYSTEM
     val accountProfile = profileState as? AuthenticatedProfileState.Profile
     Column(Modifier.fillMaxSize().background(palette.background)) {
         ScreenHeader(stringResource(R.string.settings))
         Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = PupsikSpacing.large),
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = HailToneSpacing.large),
         ) {
-            Text(stringResource(R.string.appearance), color = palette.text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = PupsikSpacing.large, bottom = PupsikSpacing.medium))
+            Text(stringResource(R.string.appearance), color = palette.text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = HailToneSpacing.large, bottom = HailToneSpacing.medium))
             Row(
-                Modifier.fillMaxWidth().clip(PupsikShapes.control).background(palette.surface)
-                    .then(if (lightUi) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.control) else Modifier)
+                Modifier.fillMaxWidth().clip(HailToneShapes.control).background(palette.surface)
+                    .then(if (lightUi) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.control) else Modifier)
                     .padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
@@ -243,7 +243,7 @@ internal fun PupsikSettingsScreen(
                         text = label,
                         color = if (selected && lightUi) Color.White else if (selected) palette.text else palette.muted,
                         style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.weight(1f).clip(PupsikShapes.control)
+                        modifier = Modifier.weight(1f).clip(HailToneShapes.control)
                             .background(if (selected && lightUi) palette.bronze else if (selected) palette.surfaceRaised else Color.Transparent)
                             .clickable { onAppearanceChange(mode) }.padding(vertical = 12.dp),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -254,7 +254,7 @@ internal fun PupsikSettingsScreen(
                 stringResource(R.string.call_settings),
                 color = palette.text,
                 style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(top = PupsikSpacing.xLarge, bottom = PupsikSpacing.small),
+                modifier = Modifier.padding(top = HailToneSpacing.xLarge, bottom = HailToneSpacing.small),
             )
             when (settingsState) {
                 AppSettingsState.Loading -> Text(stringResource(R.string.settings_loading), color = palette.muted)
@@ -262,7 +262,7 @@ internal fun PupsikSettingsScreen(
                 is AppSettingsState.Ready -> {
                     val currentSettings = settingsState.settings
                     Row(
-                        Modifier.fillMaxWidth().padding(vertical = PupsikSpacing.small),
+                        Modifier.fillMaxWidth().padding(vertical = HailToneSpacing.small),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
@@ -276,11 +276,11 @@ internal fun PupsikSettingsScreen(
                         stringResource(R.string.auto_answer_delay),
                         color = palette.text,
                         style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(top = PupsikSpacing.small, bottom = PupsikSpacing.small),
+                        modifier = Modifier.padding(top = HailToneSpacing.small, bottom = HailToneSpacing.small),
                     )
                     Row(
-                        Modifier.fillMaxWidth().clip(PupsikShapes.control).background(palette.surface)
-                            .then(if (lightUi) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.control) else Modifier)
+                        Modifier.fillMaxWidth().clip(HailToneShapes.control).background(palette.surface)
+                            .then(if (lightUi) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.control) else Modifier)
                             .padding(4.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
@@ -295,7 +295,7 @@ internal fun PupsikSettingsScreen(
                                 text = label,
                                 color = if (selected && lightUi) Color.White else if (selected) palette.text else palette.muted,
                                 style = MaterialTheme.typography.labelLarge,
-                                modifier = Modifier.weight(1f).clip(PupsikShapes.control)
+                                modifier = Modifier.weight(1f).clip(HailToneShapes.control)
                                     .background(if (selected && lightUi) palette.bronze else if (selected) palette.surfaceRaised else Color.Transparent)
                                     .clickable { onAutoAnswerDelayChange(delay) }.padding(vertical = 12.dp),
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -306,7 +306,7 @@ internal fun PupsikSettingsScreen(
                         stringResource(R.string.trusted_auto_answer_contacts),
                         color = palette.text,
                         style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(top = PupsikSpacing.large, bottom = PupsikSpacing.small),
+                        modifier = Modifier.padding(top = HailToneSpacing.large, bottom = HailToneSpacing.small),
                     )
                     Text(stringResource(R.string.trusted_auto_answer_explanation), color = palette.muted, style = MaterialTheme.typography.bodySmall)
                     if (currentSettings.trustedAutoAnswerUserIds.isEmpty()) {
@@ -314,12 +314,12 @@ internal fun PupsikSettingsScreen(
                             stringResource(R.string.trusted_auto_answer_empty),
                             color = palette.muted,
                             style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(vertical = PupsikSpacing.medium),
+                            modifier = Modifier.padding(vertical = HailToneSpacing.medium),
                         )
                     } else {
                         currentSettings.trustedAutoAnswerUserIds.sortedBy(java.util.UUID::toString).forEach { userId ->
                             Row(
-                                Modifier.fillMaxWidth().padding(vertical = PupsikSpacing.xSmall),
+                                Modifier.fillMaxWidth().padding(vertical = HailToneSpacing.xSmall),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(userId.toString(), color = palette.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
@@ -333,18 +333,18 @@ internal fun PupsikSettingsScreen(
                         stringResource(R.string.trusted_auto_answer_unavailable),
                         color = palette.muted,
                         style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = PupsikSpacing.small),
+                        modifier = Modifier.padding(top = HailToneSpacing.small),
                     )
                 }
             }
-            Text(stringResource(R.string.language), color = palette.text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = PupsikSpacing.xLarge, bottom = PupsikSpacing.small))
+            Text(stringResource(R.string.language), color = palette.text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = HailToneSpacing.xLarge, bottom = HailToneSpacing.small))
             var languagesExpanded by remember { mutableStateOf(false) }
             Box {
                 Row(
-                    Modifier.fillMaxWidth().clip(PupsikShapes.control)
+                    Modifier.fillMaxWidth().clip(HailToneShapes.control)
                         .background(if (lightUi) palette.surfaceRaised else palette.surface)
-                        .then(if (lightUi) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.control) else Modifier)
-                        .clickable { languagesExpanded = true }.padding(PupsikSpacing.medium),
+                        .then(if (lightUi) Modifier.border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.control) else Modifier)
+                        .clickable { languagesExpanded = true }.padding(HailToneSpacing.medium),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -363,7 +363,7 @@ internal fun PupsikSettingsScreen(
                     }
                 }
             }
-            Text(stringResource(R.string.account), color = palette.text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = PupsikSpacing.xLarge, bottom = PupsikSpacing.small))
+            Text(stringResource(R.string.account), color = palette.text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = HailToneSpacing.xLarge, bottom = HailToneSpacing.small))
             Text(
                 when (profileState) {
                     is AuthenticatedProfileState.Profile -> profileState.profile.displayName
@@ -379,13 +379,13 @@ internal fun PupsikSettingsScreen(
             accountProfile?.email?.let { Text(it, color = palette.muted, style = MaterialTheme.typography.bodySmall) }
             Row(
                 Modifier.fillMaxWidth()
-                    .then(if (lightUi) Modifier.clip(PupsikShapes.control).background(palette.surfaceRaised).border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.control) else Modifier)
+                    .then(if (lightUi) Modifier.clip(HailToneShapes.control).background(palette.surfaceRaised).border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.control) else Modifier)
                     .clickable(onClick = onOpenProfile)
-                    .padding(horizontal = if (lightUi) PupsikSpacing.medium else 0.dp, vertical = PupsikSpacing.medium),
+                    .padding(horizontal = if (lightUi) HailToneSpacing.medium else 0.dp, vertical = HailToneSpacing.medium),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Filled.Person, contentDescription = null, tint = palette.bronze)
-                Text(stringResource(R.string.profile), color = palette.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = PupsikSpacing.medium))
+                Text(stringResource(R.string.profile), color = palette.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = HailToneSpacing.medium))
             }
             TextButton(onClick = onLogout) { Text(stringResource(R.string.sign_out), color = palette.danger) }
         }
@@ -393,7 +393,7 @@ internal fun PupsikSettingsScreen(
 }
 
 @Composable
-internal fun PupsikProfileScreen(
+internal fun HailToneProfileScreen(
     state: AuthenticatedProfileState,
     phoneState: PhoneVerificationState,
     onBack: () -> Unit,
@@ -405,7 +405,7 @@ internal fun PupsikProfileScreen(
     onResendPhone: suspend () -> Unit,
     onVerifyPhone: suspend (String) -> Unit,
 ) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     val scope = rememberCoroutineScope()
     var displayName by rememberSaveable { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
@@ -427,7 +427,7 @@ internal fun PupsikProfileScreen(
             AuthenticatedProfileState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator(color = palette.bronze)
-                    Text(stringResource(R.string.profile_loading), color = palette.muted, modifier = Modifier.padding(top = PupsikSpacing.medium))
+                    Text(stringResource(R.string.profile_loading), color = palette.muted, modifier = Modifier.padding(top = HailToneSpacing.medium))
                 }
             }
             AuthenticatedProfileState.SignedOut -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -444,18 +444,18 @@ internal fun PupsikProfileScreen(
                 onAction = onRetry,
             )
             is AuthenticatedProfileState.Profile -> Column(
-                Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = PupsikSpacing.large),
+                Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = HailToneSpacing.large),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Spacer(Modifier.height(PupsikSpacing.section))
-                PupsikAvatar(profileInitials(state.profile.displayName, email), 108.dp)
+                Spacer(Modifier.height(HailToneSpacing.section))
+                HailToneAvatar(profileInitials(state.profile.displayName, email), 108.dp)
                 Text(
                     state.profile.displayName ?: stringResource(R.string.profile_name_not_set),
                     color = if (state.profile.displayName == null) palette.muted else palette.text,
                     style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(top = PupsikSpacing.medium),
+                    modifier = Modifier.padding(top = HailToneSpacing.medium),
                 )
-                Spacer(Modifier.height(PupsikSpacing.xLarge))
+                Spacer(Modifier.height(HailToneSpacing.xLarge))
                 OutlinedTextField(
                     value = displayName,
                     onValueChange = { displayName = it; saveResult = null },
@@ -480,7 +480,7 @@ internal fun PupsikProfileScreen(
                         }
                     },
                     enabled = !saving && displayName.trim().isNotEmpty() && displayName.trim() != state.profile.displayName,
-                    modifier = Modifier.fillMaxWidth().padding(top = PupsikSpacing.medium),
+                    modifier = Modifier.fillMaxWidth().padding(top = HailToneSpacing.medium),
                     colors = ButtonDefaults.buttonColors(containerColor = palette.bronze),
                 ) {
                     if (saving) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
@@ -494,7 +494,7 @@ internal fun PupsikProfileScreen(
                         ProfileUpdateResult.MISSING_PROFILE -> stringResource(R.string.profile_missing)
                         ProfileUpdateResult.FAILED -> stringResource(R.string.profile_error)
                     }
-                    Text(resultText, color = palette.muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = PupsikSpacing.small))
+                    Text(resultText, color = palette.muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = HailToneSpacing.small))
                 }
                 if (email != null) {
                     ProfileDetail(stringResource(R.string.account), email)
@@ -506,8 +506,8 @@ internal fun PupsikProfileScreen(
                     onResend = onResendPhone,
                     onVerify = onVerifyPhone,
                 )
-                Spacer(Modifier.height(PupsikSpacing.large))
-                TextButton(onClick = onLogout, modifier = Modifier.padding(bottom = PupsikSpacing.large)) { Text(stringResource(R.string.sign_out), color = palette.danger) }
+                Spacer(Modifier.height(HailToneSpacing.large))
+                TextButton(onClick = onLogout, modifier = Modifier.padding(bottom = HailToneSpacing.large)) { Text(stringResource(R.string.sign_out), color = palette.danger) }
             }
         }
     }
@@ -515,14 +515,14 @@ internal fun PupsikProfileScreen(
 
 @Composable
 private fun ProfileMessage(message: String, action: String, onAction: () -> Unit) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     Column(
-        Modifier.fillMaxSize().padding(PupsikSpacing.large),
+        Modifier.fillMaxSize().padding(HailToneSpacing.large),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Text(message, color = palette.muted, style = MaterialTheme.typography.bodyLarge)
-        TextButton(onClick = onAction, modifier = Modifier.padding(top = PupsikSpacing.small)) {
+        TextButton(onClick = onAction, modifier = Modifier.padding(top = HailToneSpacing.small)) {
             Text(action, color = palette.bronze)
         }
     }
@@ -530,40 +530,40 @@ private fun ProfileMessage(message: String, action: String, onAction: () -> Unit
 
 @Composable
 private fun ProfileDetail(label: String, value: String) {
-    val palette = LocalPupsikPalette.current
-    Column(Modifier.fillMaxWidth().padding(vertical = PupsikSpacing.small)) {
+    val palette = LocalHailTonePalette.current
+    Column(Modifier.fillMaxWidth().padding(vertical = HailToneSpacing.small)) {
         Text(label, color = palette.muted, style = MaterialTheme.typography.bodyMedium)
-        Text(value, color = palette.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = PupsikSpacing.xSmall))
+        Text(value, color = palette.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = HailToneSpacing.xSmall))
     }
 }
 
 @Composable
-internal fun PupsikIncomingCallScreen(
+internal fun HailToneIncomingCallScreen(
     peerName: String,
     errorMessage: String?,
     onDecline: () -> Unit,
     onAnswer: () -> Unit,
 ) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     CallBackdrop(peerName) {
-        Column(Modifier.fillMaxSize().padding(horizontal = PupsikSpacing.large, vertical = PupsikSpacing.medium), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxSize().padding(horizontal = HailToneSpacing.large, vertical = HailToneSpacing.medium), horizontalAlignment = Alignment.CenterHorizontally) {
             Spacer(Modifier.weight(0.35f))
             OrbitalAvatar(peerName)
-            Text(peerName, color = palette.text, style = MaterialTheme.typography.displayMedium, modifier = Modifier.padding(top = PupsikSpacing.large))
-            Text(stringResource(R.string.incoming_call_status), color = palette.muted, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = PupsikSpacing.small))
-            if (errorMessage != null) Text(errorMessage, color = palette.danger, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = PupsikSpacing.small))
+            Text(peerName, color = palette.text, style = MaterialTheme.typography.displayMedium, modifier = Modifier.padding(top = HailToneSpacing.large))
+            Text(stringResource(R.string.incoming_call_status), color = palette.muted, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = HailToneSpacing.small))
+            if (errorMessage != null) Text(errorMessage, color = palette.danger, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = HailToneSpacing.small))
             Spacer(Modifier.weight(1f))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 SwipeCallAction(stringResource(R.string.swipe_to_decline), positive = false, onComplete = onDecline)
                 SwipeCallAction(stringResource(R.string.swipe_to_answer), positive = true, onComplete = onAnswer)
             }
-            Spacer(Modifier.height(PupsikSpacing.large))
+            Spacer(Modifier.height(HailToneSpacing.large))
         }
     }
 }
 
 @Composable
-internal fun PupsikActiveCallScreen(
+internal fun HailToneActiveCallScreen(
     peerName: String,
     isMuted: Boolean,
     speakerEnabled: Boolean,
@@ -575,9 +575,9 @@ internal fun PupsikActiveCallScreen(
     onToggleSpeaker: () -> Unit,
     onEndCall: () -> Unit,
 ) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     CallBackdrop(peerName) {
-        Column(Modifier.fillMaxSize().padding(horizontal = PupsikSpacing.large, vertical = PupsikSpacing.small), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxSize().padding(horizontal = HailToneSpacing.large, vertical = HailToneSpacing.small), horizontalAlignment = Alignment.CenterHorizontally) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back), tint = palette.text) }
                 Spacer(Modifier.weight(1f))
@@ -585,17 +585,17 @@ internal fun PupsikActiveCallScreen(
             }
             Spacer(Modifier.weight(0.5f))
             OrbitalAvatar(peerName)
-            Text(peerName, color = palette.text, style = MaterialTheme.typography.displayMedium, modifier = Modifier.padding(top = PupsikSpacing.large))
+            Text(peerName, color = palette.text, style = MaterialTheme.typography.displayMedium, modifier = Modifier.padding(top = HailToneSpacing.large))
             val status = when (callState) {
                 WebRtcCallState.CONNECTED -> stringResource(R.string.call_connected)
                 WebRtcCallState.FAILED -> RuntimeDiagnostic.failureDisplayText(BuildConfig.DEBUG, stringResource(R.string.call_state_failed), errorMessage)
                 else -> callStateText(callState)
             }
-            Text(status, color = if (callState == WebRtcCallState.CONNECTED) palette.caramel else palette.muted, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = PupsikSpacing.small))
-            if (errorMessage != null) Text(errorMessage, color = palette.danger, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = PupsikSpacing.small))
-            if (BuildConfig.DEBUG && iceDiagnostics.isNotBlank()) Text(iceDiagnostics, color = palette.muted, fontSize = 10.sp, modifier = Modifier.padding(top = PupsikSpacing.small))
-            Spacer(Modifier.height(PupsikSpacing.large))
-            PupsikVoiceWaveform(Modifier.fillMaxWidth(0.58f).height(45.dp), active = callState == WebRtcCallState.CONNECTED)
+            Text(status, color = if (callState == WebRtcCallState.CONNECTED) palette.caramel else palette.muted, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = HailToneSpacing.small))
+            if (errorMessage != null) Text(errorMessage, color = palette.danger, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = HailToneSpacing.small))
+            if (BuildConfig.DEBUG && iceDiagnostics.isNotBlank()) Text(iceDiagnostics, color = palette.muted, fontSize = 10.sp, modifier = Modifier.padding(top = HailToneSpacing.small))
+            Spacer(Modifier.height(HailToneSpacing.large))
+            HailToneVoiceWaveform(Modifier.fillMaxWidth(0.58f).height(45.dp), active = callState == WebRtcCallState.CONNECTED)
             Spacer(Modifier.weight(1f))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                 CallToggle(stringResource(R.string.mute), isMuted, onToggleMute) { MicrophoneIcon(isMuted) }
@@ -604,19 +604,19 @@ internal fun PupsikActiveCallScreen(
                     IconButton(onClick = onEndCall, modifier = Modifier.size(70.dp).clip(CircleShape).background(palette.danger)) {
                         Icon(Icons.Filled.Call, contentDescription = stringResource(R.string.end_call_description), tint = Color.White, modifier = Modifier.size(30.dp).rotate(135f))
                     }
-                    Text(stringResource(R.string.end_call), color = palette.muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = PupsikSpacing.small))
+                    Text(stringResource(R.string.end_call), color = palette.muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = HailToneSpacing.small))
                 }
             }
-            Spacer(Modifier.height(PupsikSpacing.large))
+            Spacer(Modifier.height(HailToneSpacing.large))
         }
     }
 }
 
 @Composable
 private fun CallBackdrop(peerName: String, content: @Composable () -> Unit) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     Box(Modifier.fillMaxSize().background(palette.background)) {
-        PupsikAvatar(peerName.take(1), 300.dp, Modifier.align(Alignment.Center).blur(46.dp).scale(1.2f))
+        HailToneAvatar(peerName.take(1), 300.dp, Modifier.align(Alignment.Center).blur(46.dp).scale(1.2f))
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(palette.background.copy(alpha = 0.54f), palette.background.copy(alpha = 0.88f), palette.background))))
         content()
     }
@@ -624,7 +624,7 @@ private fun CallBackdrop(peerName: String, content: @Composable () -> Unit) {
 
 @Composable
 private fun OrbitalAvatar(peerName: String) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     val motion = rememberInfiniteTransition(label = "avatar-orbit")
     val rotation by motion.animateFloat(0f, 360f, infiniteRepeatable(tween(14000), RepeatMode.Restart), label = "orbit-rotation")
     val pulse by motion.animateFloat(0.94f, 1.04f, infiniteRepeatable(tween(1700), RepeatMode.Reverse), label = "avatar-pulse")
@@ -638,13 +638,13 @@ private fun OrbitalAvatar(peerName: String) {
             drawCircle(palette.caramel.copy(alpha = 0.28f), style = Stroke(width = 1.dp.toPx()))
             drawArc(palette.glow.copy(alpha = 0.9f), 132f, 62f, false, style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round))
         }
-        PupsikAvatar(peerName.take(1), 154.dp, Modifier.scale(pulse))
+        HailToneAvatar(peerName.take(1), 154.dp, Modifier.scale(pulse))
     }
 }
 
 @Composable
 private fun SwipeCallAction(label: String, positive: Boolean, onComplete: () -> Unit) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val travel = with(density) { 92.dp.toPx() }
@@ -654,9 +654,9 @@ private fun SwipeCallAction(label: String, positive: Boolean, onComplete: () -> 
     val direction = if (positive) 1 else -1
     val thumbX = if (positive) drag.value else -drag.value
     Box(
-        Modifier.width(146.dp).height(64.dp).clip(PupsikShapes.capsule)
+        Modifier.width(146.dp).height(64.dp).clip(HailToneShapes.capsule)
             .background(actionColor.copy(alpha = 0.12f + progress * 0.2f))
-            .border(1.dp, actionColor.copy(alpha = 0.3f + progress * 0.45f), PupsikShapes.capsule),
+            .border(1.dp, actionColor.copy(alpha = 0.3f + progress * 0.45f), HailToneShapes.capsule),
         contentAlignment = Alignment.Center,
     ) {
         Text(label, color = palette.text, fontSize = 11.sp, fontWeight = FontWeight.Medium)
@@ -692,7 +692,7 @@ private fun SwipeCallAction(label: String, positive: Boolean, onComplete: () -> 
 
 @Composable
 private fun CallToggle(label: String, selected: Boolean, onClick: () -> Unit, icon: @Composable () -> Unit) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     val tint = if (selected) palette.caramel else palette.muted
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         IconButton(
@@ -701,13 +701,13 @@ private fun CallToggle(label: String, selected: Boolean, onClick: () -> Unit, ic
                 .background(if (selected) palette.bronze.copy(alpha = 0.32f) else palette.callGlass)
                 .border(1.dp, if (selected) palette.glow.copy(alpha = 0.8f) else palette.outline.copy(alpha = 0.75f), CircleShape),
         ) { Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { icon() } }
-        Text(label, color = tint, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = PupsikSpacing.small))
+        Text(label, color = tint, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = HailToneSpacing.small))
     }
 }
 
 @Composable
-private fun PupsikVoiceWaveform(modifier: Modifier = Modifier, active: Boolean) {
-    val palette = LocalPupsikPalette.current
+private fun HailToneVoiceWaveform(modifier: Modifier = Modifier, active: Boolean) {
+    val palette = LocalHailTonePalette.current
     val transition = rememberInfiniteTransition(label = "voice-wave")
     val phase by transition.animateFloat(0f, 1f, infiniteRepeatable(tween(if (active) 900 else 1700), RepeatMode.Reverse), label = "wave-phase")
     Canvas(modifier) {
@@ -725,9 +725,9 @@ private fun PupsikVoiceWaveform(modifier: Modifier = Modifier, active: Boolean) 
 }
 
 @Composable
-private fun PupsikAvatar(initial: String, size: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
-    val palette = LocalPupsikPalette.current
-    val lightUi = palette == PupsikPalettes.Light
+private fun HailToneAvatar(initial: String, size: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
+    val palette = LocalHailTonePalette.current
+    val lightUi = palette == HailTonePalettes.Light
     val avatarBrush = if (lightUi) {
         Brush.linearGradient(listOf(Color(0xFFFFF8EC), Color(0xFFEAD7BA)))
     } else {
@@ -743,16 +743,16 @@ private fun PupsikAvatar(initial: String, size: androidx.compose.ui.unit.Dp, mod
 }
 
 @Composable
-internal fun PupsikBottomNavigation(selected: String, onContacts: () -> Unit, onCalls: () -> Unit, onMessages: () -> Unit) {
-    val palette = LocalPupsikPalette.current
-    val lightUi = palette == PupsikPalettes.Light
+internal fun HailToneBottomNavigation(selected: String, onContacts: () -> Unit, onCalls: () -> Unit, onMessages: () -> Unit) {
+    val palette = LocalHailTonePalette.current
+    val lightUi = palette == HailTonePalettes.Light
     Row(
         if (lightUi) {
-            Modifier.fillMaxWidth().padding(horizontal = PupsikSpacing.medium, vertical = PupsikSpacing.small)
-                .height(68.dp).clip(PupsikShapes.panel).background(palette.surfaceRaised)
-                .border(1.dp, palette.outline.copy(alpha = 0.72f), PupsikShapes.panel).padding(horizontal = 12.dp)
+            Modifier.fillMaxWidth().padding(horizontal = HailToneSpacing.medium, vertical = HailToneSpacing.small)
+                .height(68.dp).clip(HailToneShapes.panel).background(palette.surfaceRaised)
+                .border(1.dp, palette.outline.copy(alpha = 0.72f), HailToneShapes.panel).padding(horizontal = 12.dp)
         } else {
-            Modifier.fillMaxWidth().height(72.dp).background(palette.surface).padding(horizontal = PupsikSpacing.medium)
+            Modifier.fillMaxWidth().height(72.dp).background(palette.surface).padding(horizontal = HailToneSpacing.medium)
         },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceAround,
@@ -765,37 +765,37 @@ internal fun PupsikBottomNavigation(selected: String, onContacts: () -> Unit, on
 
 @Composable
 private fun BottomNavigationItem(label: String, key: String, selected: String, onClick: () -> Unit, icon: @Composable () -> Unit) {
-    val palette = LocalPupsikPalette.current
-    val lightUi = palette == PupsikPalettes.Light
+    val palette = LocalHailTonePalette.current
+    val lightUi = palette == HailTonePalettes.Light
     val tint = if (key == selected) palette.bronze else palette.muted
-    Column(Modifier.clip(PupsikShapes.control).clickable(onClick = onClick).padding(horizontal = if (lightUi) 14.dp else PupsikSpacing.medium, vertical = PupsikSpacing.small), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.clip(HailToneShapes.control).clickable(onClick = onClick).padding(horizontal = if (lightUi) 14.dp else HailToneSpacing.medium, vertical = HailToneSpacing.small), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier.size(if (lightUi) 30.dp else 22.dp).clip(CircleShape)
                 .background(if (lightUi && key == selected) palette.bronze.copy(alpha = 0.12f) else Color.Transparent),
             contentAlignment = Alignment.Center,
         ) { androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides tint) { icon() } }
-        Text(label, color = tint, fontSize = 11.sp, fontWeight = if (key == selected) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.padding(top = PupsikSpacing.xSmall))
+        Text(label, color = tint, fontSize = 11.sp, fontWeight = if (key == selected) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.padding(top = HailToneSpacing.xSmall))
     }
 }
 
 @Composable
 internal fun ScreenHeader(title: String) {
-    val palette = LocalPupsikPalette.current
-    val lightUi = palette == PupsikPalettes.Light
-    Text(title, color = palette.text, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(horizontal = PupsikSpacing.large, vertical = if (lightUi) 20.dp else PupsikSpacing.medium))
+    val palette = LocalHailTonePalette.current
+    val lightUi = palette == HailTonePalettes.Light
+    Text(title, color = palette.text, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(horizontal = HailToneSpacing.large, vertical = if (lightUi) 20.dp else HailToneSpacing.medium))
 }
 
 @Composable
 private fun BronzeButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val palette = LocalPupsikPalette.current
-    Button(onClick = onClick, modifier = modifier.height(54.dp), shape = if (palette == PupsikPalettes.Light) PupsikShapes.control else PupsikShapes.capsule, colors = ButtonDefaults.buttonColors(containerColor = palette.bronze, contentColor = Color.White)) {
+    val palette = LocalHailTonePalette.current
+    Button(onClick = onClick, modifier = modifier.height(54.dp), shape = if (palette == HailTonePalettes.Light) HailToneShapes.control else HailToneShapes.capsule, colors = ButtonDefaults.buttonColors(containerColor = palette.bronze, contentColor = Color.White)) {
         Text(label, style = MaterialTheme.typography.labelLarge)
     }
 }
 
 @Composable
 private fun MicrophoneIcon(muted: Boolean) {
-    val palette = LocalPupsikPalette.current
+    val palette = LocalHailTonePalette.current
     Canvas(Modifier.size(24.dp)) {
         val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
         drawRoundRect(Color.White, Offset(size.width * 0.38f, size.height * 0.12f), Size(size.width * 0.24f, size.height * 0.48f), androidx.compose.ui.geometry.CornerRadius(size.width * 0.12f), style = stroke)
