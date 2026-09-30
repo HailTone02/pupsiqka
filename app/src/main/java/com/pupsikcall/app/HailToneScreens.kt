@@ -208,6 +208,8 @@ internal fun HailToneSettingsScreen(
     onAutoAnswerEnabledChange: (Boolean) -> Unit,
     onAutoAnswerDelayChange: (AutoAnswerDelay) -> Unit,
     onRemoveTrustedUser: (java.util.UUID) -> Unit,
+    verifiedContacts: List<HailToneContactLink>,
+    onTrustedContactChange: (java.util.UUID, Boolean) -> Unit,
     languageCodes: List<String>,
     languageNames: List<String>,
     selectedLanguageIndex: Int,
@@ -316,8 +318,25 @@ internal fun HailToneSettingsScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(vertical = HailToneSpacing.medium),
                         )
-                    } else {
-                        currentSettings.trustedAutoAnswerUserIds.sortedBy(java.util.UUID::toString).forEach { userId ->
+                    }
+                    verifiedContacts.forEach { contact ->
+                        val userId = contact.account.userId
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = HailToneSpacing.xSmall),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(userId.toString(), color = palette.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                            Switch(
+                                checked = userId in currentSettings.trustedAutoAnswerUserIds,
+                                onCheckedChange = { trusted -> onTrustedContactChange(userId, trusted) },
+                            )
+                        }
+                    }
+                    val linkedUserIds = verifiedContacts.map { it.account.userId }.toSet()
+                    currentSettings.trustedAutoAnswerUserIds
+                        .filterNot { it in linkedUserIds }
+                        .sortedBy(java.util.UUID::toString)
+                        .forEach { userId ->
                             Row(
                                 Modifier.fillMaxWidth().padding(vertical = HailToneSpacing.xSmall),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -328,13 +347,14 @@ internal fun HailToneSettingsScreen(
                                 }
                             }
                         }
+                    if (verifiedContacts.isEmpty()) {
+                        Text(
+                            stringResource(R.string.trusted_auto_answer_unavailable),
+                            color = palette.muted,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = HailToneSpacing.small),
+                        )
                     }
-                    Text(
-                        stringResource(R.string.trusted_auto_answer_unavailable),
-                        color = palette.muted,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = HailToneSpacing.small),
-                    )
                 }
             }
             Text(stringResource(R.string.language), color = palette.text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = HailToneSpacing.xLarge, bottom = HailToneSpacing.small))

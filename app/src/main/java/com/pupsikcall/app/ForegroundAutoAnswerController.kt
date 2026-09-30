@@ -23,8 +23,14 @@ internal class HandlerAutoAnswerScheduler : AutoAnswerScheduler {
 }
 
 internal class ForegroundAutoAnswerController(private val scheduler: AutoAnswerScheduler) {
-    private data class TimerKey(val callId: UUID, val callerUserId: UUID, val delay: AutoAnswerDelay)
+    private data class TimerKey(
+        val callId: UUID,
+        val callerUserId: UUID,
+        val localAuthenticatedUserId: UUID,
+        val delay: AutoAnswerDelay,
+    )
 
+    private var localAuthenticatedUserId: UUID? = null
     private var latestCallId: UUID? = null
     private var latestInput: AutoAnswerPolicyInput? = null
     private var latestAnswerAction: (() -> Unit)? = null
@@ -35,6 +41,7 @@ internal class ForegroundAutoAnswerController(private val scheduler: AutoAnswerS
 
     @Synchronized
     fun update(callId: UUID?, input: AutoAnswerPolicyInput, answerAction: () -> Unit) {
+        onAuthenticatedUserChanged(input.localAuthenticatedUserId)
         latestCallId = callId
         latestInput = input
         latestAnswerAction = answerAction
@@ -48,7 +55,11 @@ internal class ForegroundAutoAnswerController(private val scheduler: AutoAnswerS
         }
         if (consumedCallId == callId) return
 
-        val key = TimerKey(callId, callerId, input.delay)
+        val localUserId = input.localAuthenticatedUserId ?: run {
+            cancelPending()
+            return
+        }
+        val key = TimerKey(callId, callerId, localUserId, input.delay)
         if (pendingKey == key) return
         cancelPending()
         pendingKey = key
@@ -71,6 +82,17 @@ internal class ForegroundAutoAnswerController(private val scheduler: AutoAnswerS
     }
 
     @Synchronized
+    fun onAuthenticatedUserChanged(userId: UUID?) {
+        if (localAuthenticatedUserId == userId) return
+        localAuthenticatedUserId = userId
+        cancelPending()
+        latestCallId = null
+        latestInput = null
+        latestAnswerAction = null
+        consumedCallId = null
+    }
+
+    @Synchronized
     fun cancel() {
         cancelPending()
         latestCallId = null
@@ -81,12 +103,15 @@ internal class ForegroundAutoAnswerController(private val scheduler: AutoAnswerS
 
     private fun completeTimer(key: TimerKey, scheduledGeneration: Long) {
         val action = synchronized(this) {
-            if (generation != scheduledGeneration || pendingKey != key || latestCallId != key.callId) return
+            if (generation != scheduledGeneration || pendingKey != key || latestCallId != key.callId ||
+                localAuthenticatedUserId != key.localAuthenticatedUserId
+            ) return
             pendingKey = null
             pendingTask = null
             val currentInput = latestInput ?: return
             val decision = AutoAnswerPolicy.evaluate(currentInput) as? AutoAnswerDecision.EligibleAfter
-            if (currentInput.routedCallerUserId != key.callerUserId || currentInput.delay != key.delay ||
+            if (currentInput.localAuthenticatedUserId != key.localAuthenticatedUserId ||
+                currentInput.routedCallerUserId != key.callerUserId || currentInput.delay != key.delay ||
                 decision?.delaySeconds != key.delay.seconds || consumedCallId == key.callId
             ) return
             consumedCallId = key.callId

@@ -60,6 +60,16 @@ class AppSettingsRepositoryTest {
     }
 
     @Test
+    fun autoAnswerPreferenceNamesAreScopedToAuthenticatedUserUuid() {
+        val first = autoAnswerPreferenceNames(uuid(1))
+        val second = autoAnswerPreferenceNames(uuid(2))
+
+        assertFalse(first.enabled == second.enabled)
+        assertFalse(first.delaySeconds == second.delaySeconds)
+        assertFalse(first.trustedUserIds == second.trustedUserIds)
+    }
+
+    @Test
     fun settingsSurviveRepositoryRecreationAndSignedOutClearsTrust() = runBlocking {
         val persistence = FakeSettingsPersistence()
         val repository = AppSettingsRepository(persistence, Dispatchers.Unconfined)
@@ -121,6 +131,7 @@ class AutoAnswerPolicyTest {
         assertManual(input(enabled = true, incomingId = "bad-uuid"))
         assertManual(input(enabled = true, routedId = uuid(3)))
         assertManual(input(enabled = true, signedIn = false))
+        assertManual(input(enabled = true, localUserId = null))
         assertManual(input(enabled = true, callState = AutoAnswerCallState.ACCEPTED))
     }
 
@@ -175,6 +186,7 @@ class AutoAnswerPolicyTest {
     private fun input(
         enabled: Boolean,
         signedIn: Boolean = true,
+        localUserId: UUID? = uuid(1),
         incomingId: String? = uuid(2).toString(),
         routedId: UUID? = uuid(2),
         trusted: Set<UUID> = setOf(uuid(2)),
@@ -183,6 +195,7 @@ class AutoAnswerPolicyTest {
     ) = AutoAnswerPolicyInput(
         featureEnabled = enabled,
         signedIn = signedIn,
+        localAuthenticatedUserId = localUserId,
         incomingCallerUserId = incomingId,
         routedCallerUserId = routedId,
         trustedUserIds = trusted,

@@ -300,6 +300,24 @@ begin
     end;
 end;
 $$;
+reset role;
+select set_config('request.jwt.claim.sub', current_setting('test.contact.owner'), true);
+set local role authenticated;
+do $$
+begin
+    begin
+        perform * from public.create_call_session(
+            gen_random_uuid(), current_setting('test.contact.peer')::uuid
+        );
+        raise exception 'caller created a call after the callee blocked them';
+    exception when insufficient_privilege then
+        null;
+    end;
+end;
+$$;
+reset role;
+select set_config('request.jwt.claim.sub', current_setting('test.contact.peer'), true);
+set local role authenticated;
 select public.unblock_hailtone_contact(current_setting('test.contact.owner')::uuid);
 do $$
 begin

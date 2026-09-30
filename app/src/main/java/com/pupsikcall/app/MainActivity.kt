@@ -96,9 +96,13 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.status.SessionStatus
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 private val AppBackground: Color @Composable get() = LocalHailTonePalette.current.background
@@ -370,6 +374,12 @@ private fun HailToneApp(
         newSignaling
     }
     signalingRef = signaling
+    val authenticatedUserId by remember(signaling) {
+        signaling.authClient?.auth?.sessionStatus?.map { status ->
+            (status as? SessionStatus.Authenticated)
+                ?.let { authenticatedCallUserId(it.session.user?.id) }
+        } ?: flowOf(null)
+    }.collectAsState(initial = null)
     val contactDirectory = remember(signaling, context.applicationContext) {
         HailToneContactDirectory(
             backend = SupabaseHailToneContactDirectoryBackend(signaling.authClient),
@@ -379,10 +389,15 @@ private fun HailToneApp(
     val authController = remember(signaling) { SupabaseAuthController(signaling.authClient) }
     val authState by authController.state.collectAsState()
     val pushTokenRegistrar = remember(context.applicationContext) { DevicePushTokenRegistrar(context.applicationContext) }
-    val appSettingsRepository = remember(context.applicationContext) { AppSettingsRepository(context.applicationContext) }
+    val appSettingsRepository = remember(context.applicationContext, authenticatedUserId) {
+        AppSettingsRepository(context.applicationContext, authenticatedUserId)
+    }
     val appSettingsState by appSettingsRepository.state.collectAsState()
     val appSettings = (appSettingsState as? AppSettingsState.Ready)?.settings ?: AppSettings()
     val appearanceMode = appSettings.appearance
+    var verifiedAutoAnswerContacts by remember(authenticatedUserId) {
+        mutableStateOf<List<HailToneContactLink>>(emptyList())
+    }
     val profileRepository = remember(signaling) { AuthenticatedProfileRepository(signaling.authClient) }
     val profileState by profileRepository.state.collectAsState()
     val phoneVerificationController = remember(signaling) {
@@ -396,6 +411,19 @@ private fun HailToneApp(
     val messageListState by messagingRepository.messageState.collectAsState()
     val callHistoryRepository = remember(signaling) { CallHistoryRepository(signaling.authClient) }
     val callHistoryState by callHistoryRepository.state.collectAsState()
+    val callHistoryUserId by callHistoryRepository.authenticatedUserId.collectAsState()
+
+    LaunchedEffect(authenticatedUserId, screen) {
+        verifiedAutoAnswerContacts = emptyList()
+        if (authenticatedUserId != null && screen == DemoScreen.Settings) {
+            val linkedContacts = runCatching {
+                SupabaseHailToneContactDirectoryBackend(signaling.authClient).listLinkedContacts()
+            }.getOrDefault(emptyList())
+            if (signaling.authenticatedUserId() == authenticatedUserId) {
+                verifiedAutoAnswerContacts = linkedContacts
+            }
+        }
+    }
 
     val logout: () -> Unit = {
         authScope.launch {
@@ -647,7 +675,7 @@ private fun HailToneApp(
         onDispose { appSettingsRepository.close() }
     }
 
-    LaunchedEffect(authState.phase, screen) {
+    LaunchedEffect(authState.phase, screen, callHistoryUserId) {
         if (authState.phase == AuthPhase.AUTHENTICATED && screen == DemoScreen.Messages) {
             messagingRepository.loadConversations()
         }
@@ -704,6 +732,7 @@ private fun HailToneApp(
     val autoAnswerInput = AutoAnswerPolicyInput(
         featureEnabled = appSettings.autoAnswerEnabled,
         signedIn = authState.phase == AuthPhase.AUTHENTICATED && appInForeground,
+        localAuthenticatedUserId = authenticatedUserId,
         incomingCallerUserId = activeIncomingRoute?.remoteUserId?.toString(),
         routedCallerUserId = activeIncomingRoute?.remoteUserId,
         trustedUserIds = appSettings.trustedAutoAnswerUserIds,
@@ -738,6 +767,7 @@ private fun HailToneApp(
                 IncomingCallNotificationManager.showCall(context, activeSession.callId, activeSession.callerUserId)
             }
         }
+        autoAnswerController.onAuthenticatedUserChanged(authenticatedUserId)
         autoAnswerController.update(activeIncomingRoute?.session?.callId, autoAnswerInput) {
             if (screen == DemoScreen.IncomingCall && currentCallId == activeIncomingRoute?.session?.callId?.toString() &&
                 activeCallSession?.status == AuthenticatedCallStatus.RINGING
@@ -937,6 +967,28 @@ private fun HailToneApp(
                         onAutoAnswerEnabledChange = { enabled -> authScope.launch { appSettingsRepository.setAutoAnswerEnabled(enabled) } },
                         onAutoAnswerDelayChange = { delay -> authScope.launch { appSettingsRepository.setAutoAnswerDelay(delay) } },
                         onRemoveTrustedUser = { userId -> authScope.launch { appSettingsRepository.removeTrustedUser(userId) } },
+                        verifiedContacts = verifiedAutoAnswerContacts,
+                        onTrustedContactChange = { userId, trusted ->
+                            authScope.launch {
+                                val expectedUserId = authenticatedUserId ?: return@launch
+                                if (signaling.authenticatedUserId() != expectedUserId) return@launch
+                                if (trusted) {
+                                    val verifiedContact = runCatching {
+                                        SupabaseHailToneContactDirectoryBackend(signaling.authClient)
+                                            .listLinkedContacts()
+                                            .firstOrNull { it.account.userId == userId }
+                                    }.getOrNull() ?: return@launch
+                                    if (signaling.authenticatedUserId() != expectedUserId) return@launch
+                                    appSettingsRepository.addTrustedAuthenticatedUser(
+                                        userId = verifiedContact.account.userId,
+                                        currentUserId = expectedUserId,
+                                        matchedAuthenticatedUserId = verifiedContact.account.userId,
+                                    )
+                                } else {
+                                    appSettingsRepository.removeTrustedUser(userId)
+                                }
+                            }
+                        },
                         languageCodes = languageCodes,
                         languageNames = languageNames,
                         selectedLanguageIndex = selectedLanguageIndex,

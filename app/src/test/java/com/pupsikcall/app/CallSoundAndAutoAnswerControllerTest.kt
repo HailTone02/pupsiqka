@@ -233,6 +233,18 @@ class CallSoundAndAutoAnswerControllerTest {
     }
 
     @Test
+    fun localAuthenticatedUserChangeCancelsPendingAnswer() {
+        val scheduler = TestAutoAnswerScheduler()
+        val controller = ForegroundAutoAnswerController(scheduler)
+        var answers = 0
+        controller.update(callId, policyInput()) { answers++ }
+        controller.onAuthenticatedUserChanged(UUID.randomUUID())
+        scheduler.advanceBy(10_000)
+
+        assertEquals(0, answers)
+    }
+
+    @Test
     fun timerRaceCannotInvokeAnswerMoreThanOnce() {
         val scheduler = TestAutoAnswerScheduler()
         val controller = ForegroundAutoAnswerController(scheduler)
@@ -300,6 +312,7 @@ class CallSoundAndAutoAnswerControllerTest {
     private fun policyInput(delay: AutoAnswerDelay = AutoAnswerDelay.TWO) = AutoAnswerPolicyInput(
         featureEnabled = true,
         signedIn = true,
+        localAuthenticatedUserId = calleeId,
         incomingCallerUserId = callerId.toString(),
         routedCallerUserId = callerId,
         trustedUserIds = setOf(callerId),

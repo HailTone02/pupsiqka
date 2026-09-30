@@ -69,6 +69,18 @@ internal object AppSettingsCodec {
     )
 }
 
+internal data class AutoAnswerPreferenceNames(
+    val enabled: String,
+    val delaySeconds: String,
+    val trustedUserIds: String,
+)
+
+internal fun autoAnswerPreferenceNames(userId: UUID): AutoAnswerPreferenceNames = AutoAnswerPreferenceNames(
+    enabled = "auto_answer_enabled_$userId",
+    delaySeconds = "auto_answer_delay_seconds_$userId",
+    trustedUserIds = "trusted_auto_answer_user_ids_$userId",
+)
+
 internal sealed interface AppSettingsState {
     data object Loading : AppSettingsState
     data object Error : AppSettingsState
@@ -84,7 +96,11 @@ internal class AppSettingsRepository(
     private val persistence: AppSettingsPersistence,
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : AutoCloseable {
-    constructor(context: Context) : this(DataStoreAppSettingsPersistence(context.pupsikSettingsDataStore))
+    constructor(context: Context) : this(context, null)
+
+    constructor(context: Context, authenticatedUserId: UUID?) : this(
+        DataStoreAppSettingsPersistence(context.pupsikSettingsDataStore, authenticatedUserId),
+    )
 
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
     private val mutableState = MutableStateFlow<AppSettingsState>(AppSettingsState.Loading)
@@ -143,7 +159,13 @@ internal class AppSettingsRepository(
 
 private class DataStoreAppSettingsPersistence(
     private val dataStore: DataStore<Preferences>,
+    authenticatedUserId: UUID?,
 ) : AppSettingsPersistence {
+    private val autoAnswerNames = authenticatedUserId?.let(::autoAnswerPreferenceNames)
+    private val autoAnswerEnabledKey = autoAnswerNames?.let { booleanPreferencesKey(it.enabled) }
+    private val autoAnswerDelayKey = autoAnswerNames?.let { intPreferencesKey(it.delaySeconds) }
+    private val trustedAutoAnswerUserIdsKey = autoAnswerNames?.let { stringSetPreferencesKey(it.trustedUserIds) }
+
     override val settings: Flow<AppSettings> = dataStore.data
         .map(::decodePreferences)
 
@@ -159,24 +181,23 @@ private class DataStoreAppSettingsPersistence(
     private fun decodePreferences(preferences: Preferences): AppSettings = AppSettingsCodec.decode(
         StoredAppSettings(
             appearance = preferences[AppearanceKey],
-            autoAnswerEnabled = preferences[AutoAnswerEnabledKey],
-            autoAnswerDelaySeconds = preferences[AutoAnswerDelayKey],
-            trustedAutoAnswerUserIds = preferences[TrustedAutoAnswerUserIdsKey].orEmpty(),
+            autoAnswerEnabled = autoAnswerEnabledKey?.let { preferences[it] },
+            autoAnswerDelaySeconds = autoAnswerDelayKey?.let { preferences[it] },
+            trustedAutoAnswerUserIds = trustedAutoAnswerUserIdsKey?.let { preferences[it] }.orEmpty(),
         ),
     )
 
     private fun encodePreferences(preferences: MutablePreferences, settings: AppSettings) {
         preferences[AppearanceKey] = settings.appearance.preferenceValue
-        preferences[AutoAnswerEnabledKey] = settings.autoAnswerEnabled
-        preferences[AutoAnswerDelayKey] = settings.autoAnswerDelay.seconds
-        preferences[TrustedAutoAnswerUserIdsKey] = settings.trustedAutoAnswerUserIds.map(UUID::toString).toSet()
+        autoAnswerEnabledKey?.let { preferences[it] = settings.autoAnswerEnabled }
+        autoAnswerDelayKey?.let { preferences[it] = settings.autoAnswerDelay.seconds }
+        trustedAutoAnswerUserIdsKey?.let {
+            preferences[it] = settings.trustedAutoAnswerUserIds.map(UUID::toString).toSet()
+        }
     }
 
     private companion object {
         val AppearanceKey = stringPreferencesKey("appearance")
-        val AutoAnswerEnabledKey = booleanPreferencesKey("auto_answer_enabled")
-        val AutoAnswerDelayKey = intPreferencesKey("auto_answer_delay_seconds")
-        val TrustedAutoAnswerUserIdsKey = stringSetPreferencesKey("trusted_auto_answer_user_ids")
     }
 }
 
@@ -198,6 +219,7 @@ internal sealed interface AutoAnswerDecision {
 internal data class AutoAnswerPolicyInput(
     val featureEnabled: Boolean,
     val signedIn: Boolean,
+    val localAuthenticatedUserId: UUID?,
     val incomingCallerUserId: String?,
     val routedCallerUserId: UUID?,
     val trustedUserIds: Set<UUID>,
@@ -207,7 +229,9 @@ internal data class AutoAnswerPolicyInput(
 
 internal object AutoAnswerPolicy {
     fun evaluate(input: AutoAnswerPolicyInput): AutoAnswerDecision {
-        if (!input.featureEnabled || !input.signedIn || input.callState != AutoAnswerCallState.RINGING) {
+        if (!input.featureEnabled || !input.signedIn || input.localAuthenticatedUserId == null ||
+            input.callState != AutoAnswerCallState.RINGING
+        ) {
             return AutoAnswerDecision.ManualAnswerRequired
         }
         val incomingCaller = input.incomingCallerUserId

@@ -1,6 +1,11 @@
 package com.pupsikcall.app
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -142,6 +147,40 @@ class CallHistoryRepositoryTest {
     }
 
     @Test
+    fun accountSwitchClearsCachedHistoryAndRejectsPreviousUsersInFlightPage() = runBlocking {
+        val otherUserId = UUID.fromString("00000000-0000-4000-8000-000000000099")
+        val oldRow = row(id(1), "2026-09-29T10:00:00Z")
+        val newRow = row(id(2), "2026-09-29T11:00:00Z")
+        val gateway = FakeCallHistoryGateway().apply { rows = listOf(oldRow) }
+        val repository = CallHistoryRepository(gateway, Dispatchers.Unconfined)
+        repository.loadHistory()
+        assertEquals(id(1), (repository.state.value as CallHistoryState.Loaded).calls.single().callId)
+
+        val delayedPage = CompletableDeferred<List<CallHistoryRow>>()
+        val pageStarted = CompletableDeferred<Unit>()
+        gateway.suspendedRead = delayedPage
+        gateway.readStarted = pageStarted
+        val oldUserRequest = launch { repository.loadHistory() }
+        pageStarted.await()
+
+        gateway.rows = listOf(newRow)
+        gateway.switchUser(otherUserId)
+        assertEquals(CallHistoryState.Loading, repository.state.value)
+
+        delayedPage.complete(listOf(oldRow))
+        oldUserRequest.join()
+        assertEquals(CallHistoryState.Loading, repository.state.value)
+
+        repository.loadHistory()
+        val newUserCalls = (repository.state.value as CallHistoryState.Loaded).calls
+        assertEquals(listOf(id(2)), newUserCalls.map(CallHistoryRecord::callId))
+
+        gateway.switchUser(null)
+        assertEquals(CallHistoryState.SignedOut, repository.state.value)
+        repository.close()
+    }
+
+    @Test
     fun failuresExposeOnlySanitizedErrorState() = runBlocking {
         val repository = CallHistoryRepository(FakeCallHistoryGateway().apply {
             failure = IllegalStateException("access_token=secret phone=+15551234567")
@@ -169,11 +208,21 @@ class CallHistoryRepositoryTest {
 
     private class FakeCallHistoryGateway : CallHistoryGateway {
         var userId: UUID? = currentUserId
+        private val userIds = MutableStateFlow<UUID?>(currentUserId)
         var rows: List<CallHistoryRow> = emptyList()
         var failure: Exception? = null
         var loseSessionAfterRead = false
+        var suspendedRead: CompletableDeferred<List<CallHistoryRow>>? = null
+        var readStarted: CompletableDeferred<Unit>? = null
 
         override suspend fun currentUserId(): UUID? = userId
+
+        override fun observeUserId(): Flow<UUID?> = userIds
+
+        fun switchUser(nextUserId: UUID?) {
+            userId = nextUserId
+            userIds.value = nextUserId
+        }
 
         override suspend fun listCallHistory(
             userId: UUID,
@@ -181,6 +230,11 @@ class CallHistoryRepositoryTest {
             limit: Int,
         ): List<CallHistoryRow> {
             failure?.let { throw it }
+            suspendedRead?.let { pendingPage ->
+                suspendedRead = null
+                readStarted?.complete(Unit)
+                return pendingPage.await()
+            }
             val page = rows.sortedWith(
                 compareByDescending<CallHistoryRow> { it.createdAt }
                     .thenByDescending { it.callId.toString() },
