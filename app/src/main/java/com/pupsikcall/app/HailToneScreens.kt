@@ -404,6 +404,7 @@ internal fun HailToneProfileScreen(
     onRequestPhone: suspend (String) -> Unit,
     onResendPhone: suspend () -> Unit,
     onVerifyPhone: suspend (String) -> Unit,
+    phoneResendCooldownSeconds: () -> Int,
 ) {
     val palette = LocalHailTonePalette.current
     val scope = rememberCoroutineScope()
@@ -505,6 +506,7 @@ internal fun HailToneProfileScreen(
                     onRequest = onRequestPhone,
                     onResend = onResendPhone,
                     onVerify = onVerifyPhone,
+                    resendCooldownSeconds = phoneResendCooldownSeconds,
                 )
                 Spacer(Modifier.height(HailToneSpacing.large))
                 TextButton(onClick = onLogout, modifier = Modifier.padding(bottom = HailToneSpacing.large)) { Text(stringResource(R.string.sign_out), color = palette.danger) }

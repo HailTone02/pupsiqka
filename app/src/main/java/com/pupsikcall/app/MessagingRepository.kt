@@ -33,7 +33,15 @@ internal data class DirectMessage(
     val clientMessageId: UUID,
     val body: String,
     val createdAt: String,
-)
+    val deliveryState: MessageDeliveryState = MessageDeliveryState.DELIVERED,
+    val isRead: Boolean = false,
+    val pendingOlmRequestIds: List<String> = emptyList(),
+) {
+    override fun toString(): String =
+        "DirectMessage(id=$id, conversationId=$conversationId, senderId=$senderId, clientMessageId=$clientMessageId, bodyPresent=${body.isNotEmpty()}, createdAt=$createdAt, deliveryState=$deliveryState, isRead=$isRead)"
+}
+
+internal enum class MessageDeliveryState { QUEUED, SENT, DELIVERED, READ }
 
 internal data class ConversationCursor(val createdAt: String, val conversationId: UUID)
 internal data class MessageCursor(val createdAt: String, val messageId: UUID)
@@ -67,7 +75,12 @@ internal enum class MessageSendResult {
     SENT,
     INVALID_BODY,
     SESSION_LOST,
+    IDENTITY_VERIFICATION_REQUIRED,
     FAILED,
+}
+
+internal data class PeerDeviceFingerprint(val userId: UUID, val deviceId: String, val value: String) {
+    override fun toString(): String = "PeerDeviceFingerprint(userId=$userId, deviceId=$deviceId, fingerprintPresent=${value.isNotBlank()})"
 }
 
 internal interface MessagingGateway {
@@ -91,6 +104,9 @@ internal interface MessagingGateway {
         body: String,
     ): DirectMessage
     fun observeIncomingMessages(userId: UUID, conversationId: UUID): Flow<DirectMessage>
+    suspend fun pendingPeerFingerprint(userId: UUID): PeerDeviceFingerprint? = null
+    suspend fun verifyPeerFingerprint(userId: UUID, deviceId: String, fingerprint: String): Boolean = false
+    suspend fun markConversationRead(userId: UUID, conversationId: UUID) = Unit
 }
 
 internal class MessagingRepository(
@@ -184,6 +200,7 @@ internal class MessagingRepository(
                 mutableMessageState.value = MessageListState.SignedOut
                 return
             }
+            if (before == null) gateway.markConversationRead(current, conversationId)
             messageMutex.withLock {
                 if (activeConversationId != conversationId) return@withLock
                 val currentMessages = if (loadedConversationId == conversationId) {
@@ -246,10 +263,18 @@ internal class MessagingRepository(
             MessageSendResult.SENT
         } catch (cancelled: CancellationException) {
             throw cancelled
+        } catch (_: IdentityVerificationRequired) {
+            MessageSendResult.IDENTITY_VERIFICATION_REQUIRED
         } catch (_: Exception) {
             MessageSendResult.FAILED
         }
     }
+
+    suspend fun pendingPeerFingerprint(userId: UUID): PeerDeviceFingerprint? =
+        gateway.pendingPeerFingerprint(userId)
+
+    suspend fun verifyPeerFingerprint(userId: UUID, deviceId: String, fingerprint: String): Boolean =
+        gateway.verifyPeerFingerprint(userId, deviceId, fingerprint)
 
     fun startObservingMessages(conversationId: UUID): Job {
         realtimeJob?.cancel()
@@ -315,6 +340,7 @@ internal class MessagingRepository(
     override fun close() {
         stopObservingMessages()
         scope.cancel()
+        (gateway as? AutoCloseable)?.close()
     }
 
     private companion object {
@@ -325,6 +351,12 @@ internal class MessagingRepository(
         val messageOrder = compareBy<DirectMessage>({ it.createdAt }, { it.id.toString() })
     }
 }
+
+internal class IdentityVerificationRequired(
+    val peerUserId: UUID,
+    val peerDeviceId: String,
+    val fingerprint: String,
+) : IllegalStateException("Device identity requires explicit verification")
 
 internal fun mergeDirectMessages(
     existing: List<DirectMessage>,

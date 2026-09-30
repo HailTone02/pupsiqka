@@ -389,7 +389,9 @@ private fun HailToneApp(
         PhoneVerificationController(SupabasePhoneIdentityGateway(signaling.authClient))
     }
     val phoneVerificationState by phoneVerificationController.state.collectAsState()
-    val messagingRepository = remember(signaling) { MessagingRepository(SupabaseMessagingGateway(signaling.authClient)) }
+    val messagingRepository = remember(signaling, context.applicationContext) {
+        MessagingRepository(SecureSupabaseMessagingGateway(signaling.authClient, context.applicationContext))
+    }
     val conversationListState by messagingRepository.conversationState.collectAsState()
     val messageListState by messagingRepository.messageState.collectAsState()
     val callHistoryRepository = remember(signaling) { CallHistoryRepository(signaling.authClient) }
@@ -403,6 +405,9 @@ private fun HailToneApp(
                 // Sign-out still proceeds if push-token revocation is unavailable.
             }
             authController.logout()
+            if (authController.state.value.phase == AuthPhase.UNAUTHENTICATED) {
+                phoneVerificationController.clearForSignOut()
+            }
         }
         Unit
     }
@@ -908,6 +913,8 @@ private fun HailToneApp(
                             onSend = { conversationId, clientMessageId, body ->
                                 messagingRepository.sendTextMessage(conversationId, clientMessageId, body)
                             },
+                            onPendingFingerprint = messagingRepository::pendingPeerFingerprint,
+                            onVerifyFingerprint = messagingRepository::verifyPeerFingerprint,
                         )
                     } ?: HailToneMessagesScreen(
                         state = conversationListState,
@@ -948,6 +955,7 @@ private fun HailToneApp(
                         onRequestPhone = phoneVerificationController::requestVerification,
                         onResendPhone = phoneVerificationController::resendVerification,
                         onVerifyPhone = phoneVerificationController::verify,
+                        phoneResendCooldownSeconds = phoneVerificationController::resendCooldownSeconds,
                     )
                     DemoScreen.IncomingCall -> HailToneIncomingCallScreen(
                         peerName = callParticipantName.ifBlank { defaultCallParticipantName },

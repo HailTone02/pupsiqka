@@ -77,6 +77,29 @@ class MessagingRepositoryTest {
     }
 
     @Test
+    fun changedDeviceIdentityFailsClosedUntilExplicitFingerprintVerification() = runBlocking {
+        val gateway = FakeMessagingGateway().apply {
+            pendingFingerprint = PeerDeviceFingerprint(uuid(2), "DEVICE_B", "AAAA BBBB CCCC")
+            sendFailure = IdentityVerificationRequired(uuid(2), "DEVICE_B", "AAAA BBBB CCCC")
+        }
+        val repository = MessagingRepository(gateway)
+
+        assertEquals(PeerDeviceFingerprint(uuid(2), "DEVICE_B", "AAAA BBBB CCCC"), repository.pendingPeerFingerprint(uuid(2)))
+        assertEquals(MessageSendResult.IDENTITY_VERIFICATION_REQUIRED, repository.sendTextMessage(conversationId, messageId(77), "private text"))
+        assertTrue(repository.verifyPeerFingerprint(uuid(2), "DEVICE_B", "AAAA BBBB CCCC"))
+        assertFalse(repository.verifyPeerFingerprint(uuid(2), "DEVICE_B", "DIFFERENT FINGERPRINT"))
+        repository.close()
+    }
+
+    @Test
+    fun directMessageStringificationNeverIncludesPlaintext() {
+        val message = message("2026-09-29T10:00:00Z", 5).copy(body = "do not log this private text")
+
+        assertFalse(message.toString().contains("do not log this private text"))
+        assertTrue(message.toString().contains("bodyPresent=true"))
+    }
+
+    @Test
     fun incomingRealtimeDuplicatesMergeOnceAndInStableOrder() = runBlocking {
         val gateway = FakeMessagingGateway()
         val repository = MessagingRepository(gateway)
@@ -147,6 +170,8 @@ class MessagingRepositoryTest {
     private class FakeMessagingGateway : MessagingGateway {
         var userId: UUID? = currentUserId
         var listFailure: Exception? = null
+        var sendFailure: Exception? = null
+        var pendingFingerprint: PeerDeviceFingerprint? = null
         val messagePages = mutableMapOf<MessageCursor?, List<DirectMessage>>()
         val storedMessages = linkedMapOf<Triple<UUID, UUID, UUID>, DirectMessage>()
         val incoming = Channel<DirectMessage>(Channel.UNLIMITED)
@@ -178,6 +203,7 @@ class MessagingRepositoryTest {
             clientMessageId: UUID,
             body: String,
         ): DirectMessage {
+            sendFailure?.let { throw it }
             val key = Triple(conversationId, userId, clientMessageId)
             return storedMessages.getOrPut(key) {
                 DirectMessage(messageId(storedMessages.size + 10), conversationId, userId, clientMessageId, body, "2026-09-29T10:00:01Z")
@@ -188,11 +214,20 @@ class MessagingRepositoryTest {
             observationStarted.complete(Unit)
             incoming.receiveAsFlow().collect { emit(it) }
         }
+
+        override suspend fun pendingPeerFingerprint(userId: UUID): PeerDeviceFingerprint? = pendingFingerprint
+
+        override suspend fun verifyPeerFingerprint(userId: UUID, deviceId: String, fingerprint: String): Boolean =
+            pendingFingerprint?.let { it.userId == userId && it.deviceId == deviceId && it.value == fingerprint } == true
     }
 
     companion object {
         private val currentUserId = UUID.fromString("00000000-0000-4000-8000-000000000001")
         private val conversationId = UUID.fromString("00000000-0000-4000-8000-000000000010")
+
+        private fun uuid(value: Int) = UUID.fromString(
+            "00000000-0000-4000-8000-${value.toString().padStart(12, '0')}",
+        )
 
         private fun message(timestamp: String, id: Int) = DirectMessage(
             id = messageId(id),

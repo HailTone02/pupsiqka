@@ -170,6 +170,7 @@
     <string name="phone_code_hint">Verification code</string>
     <string name="phone_verify_code">Verify</string>
     <string name="phone_resend_code">Resend code</string>
+    <string name="phone_resend_cooldown">Resend available in %1$d s</string>
     <string name="phone_e164_help">Use international format with + and country code.</string>
     <string name="phone_invalid_number">Enter a valid international phone number.</string>
     <string name="phone_request_failed">Could not send a code. Check your connection or wait before trying again.</string>
@@ -188,6 +189,10 @@
     <string name="messages_realtime_error">Live updates are unavailable. Retry connection.</string>
     <string name="messages_load_older">Load earlier messages</string>
     <string name="message_send_failed">Message was not sent. Retry to safely try again.</string>
+    <string name="message_verify_identity_title">Verify device fingerprint</string>
+    <string name="message_verify_identity_body">Compare this fingerprint with your contact using a trusted channel. Messaging stays blocked until you explicitly confirm it.</string>
+    <string name="message_verify_identity_pending">This device is not verified. Messaging is paused.</string>
+    <string name="message_verify_identity_action">I compared and verified</string>
     <string name="call_participant">Call participant</string>
     <string name="call_routing_error">Call could not be connected. Retry later.</string>
 </resources>

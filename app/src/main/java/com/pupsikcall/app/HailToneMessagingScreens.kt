@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -111,6 +112,8 @@ internal fun HailToneConversationScreen(
     onRetryRealtime: () -> Unit,
     onLoadOlder: () -> Unit,
     onSend: suspend (UUID, UUID, String) -> MessageSendResult,
+    onPendingFingerprint: suspend (UUID) -> PeerDeviceFingerprint?,
+    onVerifyFingerprint: suspend (UUID, String, String) -> Boolean,
 ) {
     val palette = LocalHailTonePalette.current
     val scope = rememberCoroutineScope()
@@ -118,6 +121,12 @@ internal fun HailToneConversationScreen(
     var pendingClientMessageId by remember(conversation.id) { mutableStateOf<UUID?>(null) }
     var sending by remember(conversation.id) { mutableStateOf(false) }
     var sendFailed by remember(conversation.id) { mutableStateOf(false) }
+    var verificationRequired by remember(conversation.id) { mutableStateOf(false) }
+    var pendingFingerprint by remember(conversation.id) { mutableStateOf<PeerDeviceFingerprint?>(null) }
+
+    androidx.compose.runtime.LaunchedEffect(verificationRequired) {
+        pendingFingerprint = if (verificationRequired) runCatching { onPendingFingerprint(conversation.otherUserId) }.getOrNull() else null
+    }
 
     Column(Modifier.fillMaxSize().background(palette.background)) {
         Row(
@@ -184,6 +193,34 @@ internal fun HailToneConversationScreen(
                 if (sendFailed) {
                     Text(stringResource(R.string.message_send_failed), color = palette.danger, style = MaterialTheme.typography.bodySmall)
                 }
+                if (verificationRequired) {
+                    Text(stringResource(R.string.message_verify_identity_pending), color = palette.danger, style = MaterialTheme.typography.bodySmall)
+                    pendingFingerprint?.let { fingerprint ->
+                        AlertDialog(
+                            onDismissRequest = { verificationRequired = false },
+                            title = { Text(stringResource(R.string.message_verify_identity_title)) },
+                            text = {
+                                Column {
+                                    Text(stringResource(R.string.message_verify_identity_body), color = palette.muted)
+                                    Text(fingerprint.value, color = palette.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = HailToneSpacing.small))
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    scope.launch {
+                                        if (onVerifyFingerprint(fingerprint.userId, fingerprint.deviceId, fingerprint.value)) {
+                                            verificationRequired = false
+                                            submitMessage(draft, conversation.id, pendingClientMessageId, { pendingClientMessageId = it }, { draft = it }, { sending = it }, { sendFailed = it }, onSend, scope) { result ->
+                                                if (result == MessageSendResult.IDENTITY_VERIFICATION_REQUIRED) verificationRequired = true
+                                            }
+                                        }
+                                    }
+                                }) { Text(stringResource(R.string.message_verify_identity_action)) }
+                            },
+                            dismissButton = { TextButton(onClick = { verificationRequired = false }) { Text(stringResource(R.string.cancel)) } },
+                        )
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         value = draft,
@@ -199,7 +236,10 @@ internal fun HailToneConversationScreen(
                         shape = HailToneShapes.capsule,
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(onSend = { submitMessage(draft, conversation.id, pendingClientMessageId, { pendingClientMessageId = it }, { draft = it }, { sending = it }, { sendFailed = it }, onSend, scope) }),
+                        keyboardActions = KeyboardActions(onSend = { submitMessage(draft, conversation.id, pendingClientMessageId, { pendingClientMessageId = it }, { draft = it }, { sending = it }, { sendFailed = it }, onSend, scope) { result ->
+                            verificationRequired = result == MessageSendResult.IDENTITY_VERIFICATION_REQUIRED
+                            if (verificationRequired) sendFailed = false
+                        } }),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = palette.bronze,
                             unfocusedBorderColor = palette.outline,
@@ -210,7 +250,10 @@ internal fun HailToneConversationScreen(
                     )
                     TextButton(
                         enabled = !sending && draft.isNotBlank(),
-                        onClick = { submitMessage(draft, conversation.id, pendingClientMessageId, { pendingClientMessageId = it }, { draft = it }, { sending = it }, { sendFailed = it }, onSend, scope) },
+                        onClick = { submitMessage(draft, conversation.id, pendingClientMessageId, { pendingClientMessageId = it }, { draft = it }, { sending = it }, { sendFailed = it }, onSend, scope) { result ->
+                            verificationRequired = result == MessageSendResult.IDENTITY_VERIFICATION_REQUIRED
+                            if (verificationRequired) sendFailed = false
+                        } },
                     ) {
                         Text(stringResource(R.string.send_message), color = palette.bronze)
                     }
@@ -282,6 +325,7 @@ private fun submitMessage(
     setSendFailed: (Boolean) -> Unit,
     onSend: suspend (UUID, UUID, String) -> MessageSendResult,
     scope: kotlinx.coroutines.CoroutineScope,
+    onResult: (MessageSendResult) -> Unit = {},
 ) {
     val normalizedBody = body.trim()
     if (normalizedBody.isEmpty()) return
@@ -289,13 +333,14 @@ private fun submitMessage(
     setSending(true)
     scope.launch {
         val result = onSend(conversationId, clientMessageId, normalizedBody)
+        onResult(result)
         setSending(false)
         if (result == MessageSendResult.SENT) {
             setClientMessageId(null)
             setDraft("")
             setSendFailed(false)
         } else {
-            setSendFailed(true)
+            setSendFailed(result != MessageSendResult.IDENTITY_VERIFICATION_REQUIRED)
         }
     }
 }

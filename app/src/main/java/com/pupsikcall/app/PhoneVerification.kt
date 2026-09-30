@@ -6,6 +6,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
 
 internal data class PhoneAuthIdentity(
     val userId: String,
@@ -13,6 +14,7 @@ internal data class PhoneAuthIdentity(
     val phoneConfirmed: Boolean,
     val pendingPhone: String?,
     val phoneChangeSent: Boolean,
+    val phoneChangeSentAtMillis: Long? = null,
 ) {
     override fun toString(): String =
         "PhoneAuthIdentity(phonePresent=${phone != null}, phoneConfirmed=$phoneConfirmed, pendingPhonePresent=${pendingPhone != null}, phoneChangeSent=$phoneChangeSent)"
@@ -21,7 +23,7 @@ internal data class PhoneAuthIdentity(
 internal interface PhoneIdentityGateway {
     suspend fun currentUser(): PhoneAuthIdentity?
     suspend fun requestPhoneChange(userId: String, e164Phone: String): PhoneAuthIdentity
-    suspend fun resendPhoneChange(userId: String, e164Phone: String)
+    suspend fun resendPhoneChange(userId: String, e164Phone: String): PhoneAuthIdentity
     suspend fun verifyPhoneChange(userId: String, e164Phone: String, otp: String): PhoneAuthIdentity
 }
 
@@ -65,159 +67,254 @@ internal fun normalizeE164Phone(input: String): String? {
 
 internal class PhoneVerificationController(
     private val gateway: PhoneIdentityGateway,
+    private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val resendCooldownMillis: Long = 60_000,
 ) {
     private val mutableState = MutableStateFlow<PhoneVerificationState>(PhoneVerificationState.Checking)
     val state: StateFlow<PhoneVerificationState> = mutableState.asStateFlow()
 
+    private val operationMutex = Mutex()
     private var currentUserId: String? = null
     private var pendingPhone: String? = null
+    @Volatile private var generation = 0L
+    private var resendAvailableAtMillis = 0L
+
+    fun resendCooldownSeconds(): Int {
+        val remainingMillis = (resendAvailableAtMillis - nowMillis()).coerceAtLeast(0)
+        return ((remainingMillis + 999) / 1_000).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
+
+    fun clearForSignOut() {
+        generation++
+        clearIdentity()
+        mutableState.value = PhoneVerificationState.NoPhone
+    }
+
+    private fun clearIdentity() {
+        currentUserId = null
+        pendingPhone = null
+        resendAvailableAtMillis = 0
+    }
 
     suspend fun load() {
-        mutableState.value = PhoneVerificationState.Checking
+        if (!operationMutex.tryLock()) return
+        val operationGeneration = generation
         try {
-            val identity = gateway.currentUser()
-            if (identity == null) {
-                currentUserId = null
-                pendingPhone = null
-                mutableState.value = PhoneVerificationState.Error(PhoneVerificationError.SESSION_LOST)
-                return
+            mutableState.value = PhoneVerificationState.Checking
+            try {
+                val identity = gateway.currentUser()
+                if (generation != operationGeneration) return
+                if (identity == null) {
+                    clearIdentity()
+                    mutableState.value = PhoneVerificationState.Error(PhoneVerificationError.SESSION_LOST)
+                    return
+                }
+                currentUserId = identity.userId
+                val verifiedPhone = identity.phone?.let(::normalizeE164Phone)
+                val normalizedPendingPhone = identity.pendingPhone?.let(::normalizeE164Phone)
+                if (identity.phoneChangeSent && normalizedPendingPhone != null) {
+                    pendingPhone = normalizedPendingPhone
+                    setResendCooldown(identity.phoneChangeSentAtMillis)
+                    mutableState.value = PhoneVerificationState.AwaitingOtp
+                } else if (identity.phoneConfirmed && verifiedPhone != null) {
+                    pendingPhone = null
+                    resendAvailableAtMillis = 0
+                    mutableState.value = PhoneVerificationState.Verified
+                } else {
+                    pendingPhone = null
+                    resendAvailableAtMillis = 0
+                    mutableState.value = PhoneVerificationState.NoPhone
+                }
+            } catch (cancelled: CancellationException) {
+                if (generation == operationGeneration) {
+                    clearIdentity()
+                    mutableState.value = PhoneVerificationState.Error(PhoneVerificationError.SESSION_LOST)
+                }
+                throw cancelled
+            } catch (_: Exception) {
+                if (generation == operationGeneration) {
+                    clearIdentity()
+                    mutableState.value = PhoneVerificationState.Error(PhoneVerificationError.STATUS_CHECK_FAILED)
+                }
             }
-            currentUserId = identity.userId
-            val verifiedPhone = identity.phone?.let(::normalizeE164Phone)
-            val normalizedPendingPhone = identity.pendingPhone?.let(::normalizeE164Phone)
-            if (identity.phoneChangeSent && normalizedPendingPhone != null) {
-                pendingPhone = normalizedPendingPhone
-                mutableState.value = PhoneVerificationState.AwaitingOtp
-            } else if (identity.phoneConfirmed && verifiedPhone != null) {
-                pendingPhone = null
-                mutableState.value = PhoneVerificationState.Verified
-            } else {
-                pendingPhone = null
-                mutableState.value = PhoneVerificationState.NoPhone
-            }
-        } catch (cancelled: CancellationException) {
-            mutableState.value = PhoneVerificationState.Error(PhoneVerificationError.SESSION_LOST)
-            throw cancelled
-        } catch (_: Exception) {
-            currentUserId = null
-            pendingPhone = null
-            mutableState.value = PhoneVerificationState.Error(PhoneVerificationError.STATUS_CHECK_FAILED)
+        } finally {
+            operationMutex.unlock()
         }
     }
 
     suspend fun requestVerification(input: String) {
-        val e164Phone = normalizeE164Phone(input)
-        if (e164Phone == null) {
-            mutableState.value = PhoneVerificationState.Error(PhoneVerificationError.INVALID_PHONE)
-            return
-        }
-
-        mutableState.value = PhoneVerificationState.RequestingOtp
+        if (!operationMutex.tryLock()) return
+        val operationGeneration = generation
         try {
-            val identity = gateway.currentUser()
-            if (identity == null) {
-                mutableState.value = PhoneVerificationState.Error(PhoneVerificationError.SESSION_LOST)
+            val e164Phone = normalizeE164Phone(input)
+            if (e164Phone == null) {
+                mutableState.value = PhoneVerificationState.Error(PhoneVerificationError.INVALID_PHONE)
                 return
             }
-            currentUserId = identity.userId
-            if (identity.phoneConfirmed && identity.phone?.let(::normalizeE164Phone) == e164Phone) {
-                pendingPhone = null
-                mutableState.value = PhoneVerificationState.Verified
-                return
-            }
+            if (resendCooldownSeconds() > 0) return
 
-            pendingPhone = e164Phone
-            val updatedIdentity = gateway.requestPhoneChange(identity.userId, e164Phone)
-            if (updatedIdentity.userId != identity.userId) {
-                fail(PhoneVerificationError.ACCOUNT_CHANGED)
-            } else if (isConfirmedFor(updatedIdentity, identity.userId, e164Phone)) {
-                pendingPhone = null
-                mutableState.value = PhoneVerificationState.Verified
-            } else if (updatedIdentity.pendingPhone?.let(::normalizeE164Phone) == e164Phone && updatedIdentity.phoneChangeSent) {
-                mutableState.value = PhoneVerificationState.AwaitingOtp
-            } else {
-                fail(PhoneVerificationError.REQUEST_FAILED)
+            mutableState.value = PhoneVerificationState.RequestingOtp
+            try {
+                val identity = gateway.currentUser()
+                if (generation != operationGeneration) return
+                if (identity == null) {
+                    clearIdentity()
+                    mutableState.value = PhoneVerificationState.Error(PhoneVerificationError.SESSION_LOST)
+                    return
+                }
+                currentUserId = identity.userId
+                if (identity.phoneConfirmed && identity.phone?.let(::normalizeE164Phone) == e164Phone) {
+                    pendingPhone = null
+                    resendAvailableAtMillis = 0
+                    mutableState.value = PhoneVerificationState.Verified
+                    return
+                }
+
+                pendingPhone = e164Phone
+                val updatedIdentity = gateway.requestPhoneChange(identity.userId, e164Phone)
+                if (generation != operationGeneration) return
+                if (updatedIdentity.userId != identity.userId) {
+                    clearIdentity()
+                    fail(PhoneVerificationError.ACCOUNT_CHANGED)
+                } else if (isConfirmedFor(updatedIdentity, identity.userId, e164Phone)) {
+                    pendingPhone = null
+                    resendAvailableAtMillis = 0
+                    mutableState.value = PhoneVerificationState.Verified
+                } else if (updatedIdentity.pendingPhone?.let(::normalizeE164Phone) == e164Phone && updatedIdentity.phoneChangeSent) {
+                    setResendCooldown(updatedIdentity.phoneChangeSentAtMillis)
+                    mutableState.value = PhoneVerificationState.AwaitingOtp
+                } else {
+                    fail(PhoneVerificationError.REQUEST_FAILED)
+                }
+            } catch (cancelled: CancellationException) {
+                if (generation == operationGeneration) restoreAfterCancellation()
+                throw cancelled
+            } catch (_: Exception) {
+                if (generation == operationGeneration) fail(PhoneVerificationError.REQUEST_FAILED)
             }
-        } catch (cancelled: CancellationException) {
-            restoreAfterCancellation()
-            throw cancelled
-        } catch (_: Exception) {
-            fail(PhoneVerificationError.REQUEST_FAILED)
+        } finally {
+            operationMutex.unlock()
         }
     }
 
     suspend fun resendVerification() {
-        val userId = currentUserId
-        val e164Phone = pendingPhone
-        if (userId == null) {
-            fail(PhoneVerificationError.SESSION_LOST)
-            return
-        }
-        if (e164Phone == null) {
-            fail(PhoneVerificationError.REQUEST_FAILED)
-            return
-        }
-
-        mutableState.value = PhoneVerificationState.RequestingOtp
+        if (resendCooldownSeconds() > 0 || !operationMutex.tryLock()) return
+        val operationGeneration = generation
         try {
-            val identity = gateway.currentUser()
-            if (identity == null) {
+            if (resendCooldownSeconds() > 0) return
+            val userId = currentUserId
+            val e164Phone = pendingPhone
+            if (userId == null) {
                 fail(PhoneVerificationError.SESSION_LOST)
                 return
             }
-            if (identity.userId != userId) {
-                fail(PhoneVerificationError.ACCOUNT_CHANGED)
+            if (e164Phone == null) {
+                fail(PhoneVerificationError.REQUEST_FAILED)
                 return
             }
-            gateway.resendPhoneChange(userId, e164Phone)
-            mutableState.value = PhoneVerificationState.AwaitingOtp
-        } catch (cancelled: CancellationException) {
-            restoreAfterCancellation()
-            throw cancelled
-        } catch (_: Exception) {
-            fail(PhoneVerificationError.REQUEST_FAILED)
+
+            mutableState.value = PhoneVerificationState.RequestingOtp
+            try {
+                val identity = gateway.currentUser()
+                if (generation != operationGeneration) return
+                if (identity == null) {
+                    clearIdentity()
+                    fail(PhoneVerificationError.SESSION_LOST)
+                    return
+                }
+                if (identity.userId != userId) {
+                    clearIdentity()
+                    fail(PhoneVerificationError.ACCOUNT_CHANGED)
+                    return
+                }
+                if (isConfirmedFor(identity, userId, e164Phone)) {
+                    pendingPhone = null
+                    resendAvailableAtMillis = 0
+                    mutableState.value = PhoneVerificationState.Verified
+                    return
+                }
+                if (identity.pendingPhone?.let(::normalizeE164Phone) != e164Phone || !identity.phoneChangeSent) {
+                    clearIdentity()
+                    fail(PhoneVerificationError.CONFIRMATION_MISSING)
+                    return
+                }
+                val updatedIdentity = gateway.resendPhoneChange(userId, e164Phone)
+                if (generation != operationGeneration) return
+                if (updatedIdentity.userId != userId) {
+                    clearIdentity()
+                    fail(PhoneVerificationError.ACCOUNT_CHANGED)
+                } else if (updatedIdentity.pendingPhone?.let(::normalizeE164Phone) == e164Phone && updatedIdentity.phoneChangeSent) {
+                    setResendCooldown(updatedIdentity.phoneChangeSentAtMillis)
+                    mutableState.value = PhoneVerificationState.AwaitingOtp
+                } else {
+                    fail(PhoneVerificationError.REQUEST_FAILED)
+                }
+            } catch (cancelled: CancellationException) {
+                if (generation == operationGeneration) restoreAfterCancellation()
+                throw cancelled
+            } catch (_: Exception) {
+                if (generation == operationGeneration) fail(PhoneVerificationError.REQUEST_FAILED)
+            }
+        } finally {
+            operationMutex.unlock()
         }
     }
 
     suspend fun verify(inputOtp: String) {
-        val userId = currentUserId
-        val e164Phone = pendingPhone
-        val otp = inputOtp.trim()
-        if (userId == null || e164Phone == null) {
-            fail(PhoneVerificationError.SESSION_LOST)
-            return
-        }
-        if (otp.length !in 4..8 || otp.any { it !in '0'..'9' }) {
-            fail(PhoneVerificationError.CODE_INVALID_EXPIRED_OR_RATE_LIMITED)
-            return
-        }
-
-        mutableState.value = PhoneVerificationState.Verifying
+        if (!operationMutex.tryLock()) return
+        val operationGeneration = generation
         try {
-            val identity = gateway.currentUser()
-            if (identity == null) {
+            val userId = currentUserId
+            val e164Phone = pendingPhone
+            val otp = inputOtp.trim()
+            if (userId == null || e164Phone == null) {
                 fail(PhoneVerificationError.SESSION_LOST)
                 return
             }
-            if (identity.userId != userId) {
-                fail(PhoneVerificationError.ACCOUNT_CHANGED)
+            if (otp.length !in 4..8 || otp.any { it !in '0'..'9' }) {
+                fail(PhoneVerificationError.CODE_INVALID_EXPIRED_OR_RATE_LIMITED)
                 return
             }
-            val refreshedIdentity = gateway.verifyPhoneChange(userId, e164Phone, otp)
-            if (refreshedIdentity.userId != userId) {
-                fail(PhoneVerificationError.ACCOUNT_CHANGED)
-            } else if (isConfirmedFor(refreshedIdentity, userId, e164Phone)) {
-                pendingPhone = null
-                mutableState.value = PhoneVerificationState.Verified
-            } else {
-                fail(PhoneVerificationError.CONFIRMATION_MISSING)
+
+            mutableState.value = PhoneVerificationState.Verifying
+            try {
+                val identity = gateway.currentUser()
+                if (generation != operationGeneration) return
+                if (identity == null) {
+                    clearIdentity()
+                    fail(PhoneVerificationError.SESSION_LOST)
+                    return
+                }
+                if (identity.userId != userId) {
+                    clearIdentity()
+                    fail(PhoneVerificationError.ACCOUNT_CHANGED)
+                    return
+                }
+                val refreshedIdentity = gateway.verifyPhoneChange(userId, e164Phone, otp)
+                if (generation != operationGeneration) return
+                if (refreshedIdentity.userId != userId) {
+                    clearIdentity()
+                    fail(PhoneVerificationError.ACCOUNT_CHANGED)
+                } else if (isConfirmedFor(refreshedIdentity, userId, e164Phone)) {
+                    pendingPhone = null
+                    resendAvailableAtMillis = 0
+                    mutableState.value = PhoneVerificationState.Verified
+                } else {
+                    fail(PhoneVerificationError.CONFIRMATION_MISSING)
+                }
+            } catch (cancelled: CancellationException) {
+                if (generation == operationGeneration) restoreAfterCancellation()
+                throw cancelled
+            } catch (_: Exception) {
+                if (generation == operationGeneration) fail(PhoneVerificationError.CODE_INVALID_EXPIRED_OR_RATE_LIMITED)
             }
-        } catch (cancelled: CancellationException) {
-            restoreAfterCancellation()
-            throw cancelled
-        } catch (_: Exception) {
-            fail(PhoneVerificationError.CODE_INVALID_EXPIRED_OR_RATE_LIMITED)
+        } finally {
+            operationMutex.unlock()
         }
+    }
+
+    private fun setResendCooldown(sentAtMillis: Long?) {
+        resendAvailableAtMillis = (sentAtMillis ?: nowMillis()) + resendCooldownMillis
     }
 
     private fun isConfirmedFor(identity: PhoneAuthIdentity, userId: String, e164Phone: String): Boolean =

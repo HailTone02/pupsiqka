@@ -26,10 +26,13 @@ internal class SupabasePhoneIdentityGateway(
         return updatedUser.toPhoneAuthIdentity()
     }
 
-    override suspend fun resendPhoneChange(userId: String, e164Phone: String) {
+    override suspend fun resendPhoneChange(userId: String, e164Phone: String): PhoneAuthIdentity {
         val auth = client?.auth ?: throw IllegalStateException("Authentication is unavailable")
         requireCurrentUser(auth, userId)
         auth.resendPhone(OtpType.Phone.PHONE_CHANGE, e164Phone)
+        val updatedUser = auth.retrieveUserForCurrentSession(updateSession = true)
+        if (updatedUser.id != userId) throw IllegalStateException("Authenticated account changed")
+        return updatedUser.toPhoneAuthIdentity()
     }
 
     override suspend fun verifyPhoneChange(
@@ -65,5 +68,6 @@ internal class SupabasePhoneIdentityGateway(
         phoneConfirmed = phoneConfirmedAt != null,
         pendingPhone = newPhone,
         phoneChangeSent = phoneChangeSentAt != null,
+        phoneChangeSentAtMillis = phoneChangeSentAt?.toEpochMilliseconds(),
     )
 }

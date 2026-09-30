@@ -20,6 +20,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -39,12 +41,28 @@ internal fun PhoneVerificationSection(
     onRequest: suspend (String) -> Unit,
     onResend: suspend () -> Unit,
     onVerify: suspend (String) -> Unit,
+    resendCooldownSeconds: () -> Int,
 ) {
     val palette = LocalHailTonePalette.current
     val scope = rememberCoroutineScope()
     var phoneInput by remember { mutableStateOf("") }
     var otpInput by remember { mutableStateOf("") }
     var changingNumber by remember { mutableStateOf(false) }
+    var remainingCooldownSeconds by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(state) {
+        val hasOtp = state == PhoneVerificationState.AwaitingOtp ||
+            (state is PhoneVerificationState.Error && state.reason == PhoneVerificationError.CODE_INVALID_EXPIRED_OR_RATE_LIMITED)
+        if (hasOtp) {
+            while (true) {
+                remainingCooldownSeconds = resendCooldownSeconds()
+                if (remainingCooldownSeconds == 0) break
+                delay(1_000)
+            }
+        } else {
+            remainingCooldownSeconds = 0
+        }
+    }
 
     LaunchedEffect(state) {
         if (state == PhoneVerificationState.Verified) {
@@ -108,8 +126,15 @@ internal fun PhoneVerificationSection(
                     ) {
                         Text(stringResource(R.string.phone_verify_code))
                     }
-                    TextButton(onClick = { scope.launch { onResend() } }) {
-                        Text(stringResource(R.string.phone_resend_code), color = palette.bronze)
+                    TextButton(
+                        onClick = { scope.launch { onResend() } },
+                        enabled = remainingCooldownSeconds == 0,
+                    ) {
+                        Text(
+                            if (remainingCooldownSeconds > 0) stringResource(R.string.phone_resend_cooldown, remainingCooldownSeconds)
+                            else stringResource(R.string.phone_resend_code),
+                            color = palette.bronze,
+                        )
                     }
                 }
             }

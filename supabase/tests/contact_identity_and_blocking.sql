@@ -33,6 +33,23 @@ select set_config('test.contact.owner', owner_id::text, true),
        set_config('test.contact.unverified', unverified_id::text, true)
 from contact_identity_test_ids;
 
+insert into public.hailtone_message_devices (owner_user_id, device_id, matrix_user_id, device_keys)
+select owner_id, 'contact-owner-device', public.hailtone_matrix_user_id(owner_id),
+       jsonb_build_object(
+           'user_id', public.hailtone_matrix_user_id(owner_id),
+           'device_id', 'contact-owner-device',
+           'keys', jsonb_build_object('ed25519:contact-owner-device', 'owner-ed25519', 'curve25519:contact-owner-device', 'owner-curve25519')
+       )
+from contact_identity_test_ids
+union all
+select peer_id, 'contact-peer-device', public.hailtone_matrix_user_id(peer_id),
+       jsonb_build_object(
+           'user_id', public.hailtone_matrix_user_id(peer_id),
+           'device_id', 'contact-peer-device',
+           'keys', jsonb_build_object('ed25519:contact-peer-device', 'peer-ed25519', 'curve25519:contact-peer-device', 'peer-curve25519')
+       )
+from contact_identity_test_ids;
+
 do $$
 begin
     if not (select relrowsecurity from pg_class where oid = 'public.hailtone_contact_invites'::regclass)
@@ -173,7 +190,16 @@ begin
     select created.conversation_id into created_conversation_id
     from public.get_or_create_direct_conversation(current_setting('test.contact.owner')::uuid) as created;
     perform set_config('test.contact.conversation_id', created_conversation_id::text, true);
-    perform * from public.send_message(created_conversation_id, gen_random_uuid(), 'before block');
+    perform public.send_hailtone_olm_envelopes(
+        created_conversation_id,
+        gen_random_uuid(),
+        'contact-peer-device',
+        'm.room.encrypted',
+        jsonb_build_object(
+            public.hailtone_matrix_user_id(current_setting('test.contact.owner')::uuid),
+            jsonb_build_object('contact-owner-device', jsonb_build_object('algorithm', 'm.olm.v1.curve25519-aes-sha2', 'ciphertext', '{}'::jsonb))
+        )
+    );
 
     select to_jsonb(contact_row) into linked_contact
     from public.list_hailtone_contacts() as contact_row
@@ -258,12 +284,17 @@ begin
         null;
     end;
     begin
-        perform * from public.send_message(
+        perform public.send_hailtone_olm_envelopes(
             current_setting('test.contact.conversation_id')::uuid,
             gen_random_uuid(),
-            'after block'
+            'contact-peer-device',
+            'm.room.encrypted',
+            jsonb_build_object(
+                public.hailtone_matrix_user_id(current_setting('test.contact.owner')::uuid),
+                jsonb_build_object('contact-owner-device', jsonb_build_object('algorithm', 'm.olm.v1.curve25519-aes-sha2', 'ciphertext', '{}'::jsonb))
+            )
         );
-        raise exception 'blocked user sent a message in an existing conversation';
+        raise exception 'blocked user sent an encrypted envelope in an existing conversation';
     exception when insufficient_privilege then
         null;
     end;

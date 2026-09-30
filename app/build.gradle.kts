@@ -91,6 +91,10 @@ kotlin {
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2025.10.00")
+    // Matrix Kotlin components 26.1.28, built from matrix-rust-sdk commit b18166c68bb958a21f0bca8b2d8320cb53583362.
+    implementation(files("libs/matrix-crypto-android-26.1.28-debug.aar"))
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
+    implementation("androidx.annotation:annotation:1.9.1")
     implementation(composeBom)
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-compose:1.12.0")
@@ -105,4 +109,5 @@ dependencies {
     implementation("io.github.jan-tennert.supabase:realtime-kt:3.2.6")
     implementation("io.ktor:ktor-client-okhttp:3.3.1")
     testImplementation("junit:junit:4.13.2")
+    testRuntimeOnly("net.java.dev.jna:jna:5.18.1")
 }
