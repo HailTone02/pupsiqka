@@ -172,6 +172,8 @@ private fun HailToneApp(
     onNotificationActionConsumed: (String) -> Unit,
 ) {
     var screen by rememberSaveable { mutableStateOf(DemoScreen.SignIn) }
+    var pendingRegistrationPhone by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingRegistrationEmail by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedConversationId by rememberSaveable { mutableStateOf<String?>(null) }
     var isMuted by rememberSaveable { mutableStateOf(false) }
     var speakerEnabled by rememberSaveable { mutableStateOf(true) }
@@ -411,6 +413,20 @@ private fun HailToneApp(
     val callHistoryRepository = remember(signaling) { CallHistoryRepository(signaling.authClient) }
     val callHistoryState by callHistoryRepository.state.collectAsState()
     val callHistoryUserId by callHistoryRepository.authenticatedUserId.collectAsState()
+    val currentAccountProfile = authenticatedProfileFor(profileState, authenticatedUserId)
+    val loadedProfile = currentAccountProfile?.profile
+    val pendingPhoneForThisAccount = pendingRegistrationPhone.takeIf {
+        it != null && pendingRegistrationEmail.equals(authState.email?.trim(), ignoreCase = true)
+    }
+
+    LaunchedEffect(loadedProfile?.userId, loadedProfile?.identityComplete) {
+        if (loadedProfile?.identityComplete == true &&
+            pendingRegistrationEmail.equals(authState.email?.trim(), ignoreCase = true)
+        ) {
+            pendingRegistrationPhone = null
+            pendingRegistrationEmail = null
+        }
+    }
 
     LaunchedEffect(authenticatedUserId, screen) {
         verifiedAutoAnswerContacts = emptyList()
@@ -877,11 +893,36 @@ private fun HailToneApp(
                     selectedLanguageIndex = selectedLanguageIndex,
                     onLanguageSelected = ::applyApplicationLanguage,
                     onSignIn = { email, password -> authScope.launch { authController.login(email, password) } },
-                    onRegister = { email, password -> authScope.launch { authController.register(email, password) } },
+                    onRegister = { input ->
+                        authScope.launch {
+                            if (authController.register(input) != RegistrationResult.FAILED) {
+                                pendingRegistrationPhone = normalizeE164Phone(input.phone)
+                                pendingRegistrationEmail = input.email.trim().lowercase()
+                            }
+                        }
+                    },
                 )
-                else -> when (screen) {
+                else -> if (loadedProfile == null || (loadedProfile.identityRequired && !loadedProfile.identityComplete)) {
+                    HailToneIdentityCompletionScreen(
+                        profile = loadedProfile,
+                        profileState = profileState,
+                        phoneState = phoneVerificationState,
+                        initialPhone = pendingPhoneForThisAccount,
+                        onLoadPhone = phoneVerificationController::load,
+                        onRequestPhone = phoneVerificationController::requestVerification,
+                        onResendPhone = phoneVerificationController::resendVerification,
+                        onVerifyPhone = { code ->
+                            phoneVerificationController.verify(code)
+                            profileRepository.reload()
+                        },
+                        phoneResendCooldownSeconds = phoneVerificationController::resendCooldownSeconds,
+                        onRetry = profileRepository::reload,
+                        onLogout = logout,
+                    )
+                } else when (screen) {
                     DemoScreen.SignIn, DemoScreen.Contacts -> HailToneContactsScreen(
                         profileName = (profileState as? AuthenticatedProfileState.Profile)
+                            ?.takeIf { it.identity.userId == authenticatedUserId && it.profile.userId == authenticatedUserId }
                             ?.profile?.displayName.orEmpty(),
                         onOpenCalls = { screen = DemoScreen.Calls },
                         onOpenMessages = { screen = DemoScreen.Messages },
@@ -1071,11 +1112,17 @@ private fun SignInScreen(
     selectedLanguageIndex: Int,
     onLanguageSelected: (String) -> Unit,
     onSignIn: (String, String) -> Unit,
-    onRegister: (String, String) -> Unit,
+    onRegister: (RegistrationInput) -> Unit,
 ) {
     var registering by rememberSaveable { mutableStateOf(false) }
     var email by rememberSaveable { mutableStateOf("") }
+    var name by rememberSaveable { mutableStateOf("") }
+    var surname by rememberSaveable { mutableStateOf("") }
+    var username by rememberSaveable { mutableStateOf("") }
+    var phone by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var registrationInvalid by remember { mutableStateOf(false) }
     val busy = state.isBusy
     val palette = LocalHailTonePalette.current
     val lightUi = palette == HailTonePalettes.Light
@@ -1106,18 +1153,67 @@ private fun SignInScreen(
         ) {
             LanguageSelector(languageCodes, languageNames, selectedLanguageIndex, onLanguageSelected)
             Spacer(Modifier.height(20.dp))
+            if (registering) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it; registrationInvalid = false },
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    enabled = !busy,
+                    placeholder = { Text(stringResource(R.string.registration_name)) },
+                    singleLine = true,
+                    shape = HailToneShapes.panel,
+                    colors = signInFieldColors(),
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = surname,
+                    onValueChange = { surname = it; registrationInvalid = false },
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    enabled = !busy,
+                    placeholder = { Text(stringResource(R.string.registration_surname)) },
+                    singleLine = true,
+                    shape = HailToneShapes.panel,
+                    colors = signInFieldColors(),
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it; registrationInvalid = false },
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    enabled = !busy,
+                    placeholder = { Text(stringResource(R.string.registration_username)) },
+                    singleLine = true,
+                    shape = HailToneShapes.panel,
+                    colors = signInFieldColors(),
+                )
+                Spacer(Modifier.height(10.dp))
+            }
             OutlinedTextField(
                 value = email,
                 onValueChange = { email = it },
                 modifier = Modifier.fillMaxWidth().height(60.dp),
                 enabled = !busy,
-                placeholder = { Text(stringResource(R.string.email), fontSize = 15.sp) },
+                placeholder = { Text(stringResource(if (registering) R.string.email else R.string.login_identifier), fontSize = 15.sp) },
                 leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(21.dp)) },
                 singleLine = true,
                 shape = HailToneShapes.panel,
                 colors = signInFieldColors(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
+                keyboardOptions = KeyboardOptions(keyboardType = if (registering) KeyboardType.Email else KeyboardType.Text, capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
             )
+            if (registering) {
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it; registrationInvalid = false },
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    enabled = !busy,
+                    placeholder = { Text(stringResource(R.string.phone_number)) },
+                    singleLine = true,
+                    shape = HailToneShapes.panel,
+                    colors = signInFieldColors(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                )
+            }
             Spacer(Modifier.height(13.dp))
             OutlinedTextField(
                 value = password,
@@ -1132,7 +1228,31 @@ private fun SignInScreen(
                 colors = signInFieldColors(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             )
+            if (registering) {
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = confirmPassword,
+                    onValueChange = { confirmPassword = it; registrationInvalid = false },
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    enabled = !busy,
+                    placeholder = { Text(stringResource(R.string.registration_confirm_password)) },
+                    leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(21.dp)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    shape = HailToneShapes.panel,
+                    colors = signInFieldColors(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                )
+            }
             Spacer(Modifier.height(18.dp))
+            if (registrationInvalid) {
+                Text(
+                    stringResource(R.string.registration_invalid_fields),
+                    color = DeclineRed,
+                    fontSize = 13.sp,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                )
+            }
             state.message?.let { message ->
                 Text(
                     stringResource(message.stringResourceId()),
@@ -1144,9 +1264,21 @@ private fun SignInScreen(
             Button(
                 enabled = !busy,
                 onClick = {
-                    val submittedPassword = password
-                    password = ""
-                    if (registering) onRegister(email, submittedPassword) else onSignIn(email, submittedPassword)
+                    if (registering) {
+                        val input = RegistrationInput(name, surname, username, email, phone, password, confirmPassword)
+                        if (validateRegistration(input) != null) {
+                            registrationInvalid = true
+                        } else {
+                            registrationInvalid = false
+                            onRegister(input)
+                            password = ""
+                            confirmPassword = ""
+                        }
+                    } else {
+                        val submittedPassword = password
+                        password = ""
+                        onSignIn(email, submittedPassword)
+                    }
                 },
                 modifier = Modifier.fillMaxWidth().height(58.dp),
                 shape = HailToneShapes.panel,
@@ -1174,7 +1306,7 @@ private fun SignInScreen(
                     color = SecondaryText,
                     fontSize = 13.sp,
                 )
-                TextButton(enabled = !busy, onClick = { registering = !registering; password = "" }) {
+                TextButton(enabled = !busy, onClick = { registering = !registering; password = ""; confirmPassword = ""; registrationInvalid = false }) {
                     Text(
                         stringResource(if (registering) R.string.sign_in else R.string.create_account),
                         color = LightPurple,

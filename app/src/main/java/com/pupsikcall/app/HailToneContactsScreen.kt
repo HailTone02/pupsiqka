@@ -537,6 +537,9 @@ private fun ContactDetailsDialog(
                 account?.displayName?.takeIf(String::isNotBlank)?.let { verifiedName ->
                     Text(verifiedName, color = LocalHailTonePalette.current.text)
                 }
+                account?.username?.let { username ->
+                    Text("@$username", color = LocalHailTonePalette.current.bronze)
+                }
                 contact.phoneNumbers.forEach { number ->
                     Text(number.displayValue, color = LocalHailTonePalette.current.muted)
                 }

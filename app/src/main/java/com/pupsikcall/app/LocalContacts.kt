@@ -49,6 +49,7 @@ internal sealed interface ContactsState {
 internal data class MatchedHailToneAccount(
     val userId: UUID,
     val displayName: String?,
+    val username: String? = null,
     val avatarPath: String? = null,
     val blockedByMe: Boolean = false,
     val blockedMe: Boolean = false,

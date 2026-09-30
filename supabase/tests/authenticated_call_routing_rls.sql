@@ -3,10 +3,19 @@ begin;
 create temporary table call_test_ids on commit drop as
 select gen_random_uuid() caller_id, gen_random_uuid() callee_id, gen_random_uuid() unrelated_id;
 
-insert into auth.users (id, email)
-select caller_id, caller_id::text || '@call-test.invalid' from call_test_ids
-union all select callee_id, callee_id::text || '@call-test.invalid' from call_test_ids
-union all select unrelated_id, unrelated_id::text || '@call-test.invalid' from call_test_ids;
+insert into auth.users (id, email, email_confirmed_at, phone, phone_confirmed_at, raw_user_meta_data)
+select caller_id, caller_id::text || '@call-test.invalid', now(),
+    '+1555' || substr(translate(md5(caller_id::text), 'abcdef', '012345'), 1, 10), now(),
+    jsonb_build_object('hailtone_name', 'Call', 'hailtone_surname', 'User', 'hailtone_username', 'call_' || substr(replace(caller_id::text, '-', ''), 1, 20))
+from call_test_ids
+union all select callee_id, callee_id::text || '@call-test.invalid', now(),
+    '+1555' || substr(translate(md5(callee_id::text), 'abcdef', '012345'), 1, 10), now(),
+    jsonb_build_object('hailtone_name', 'Call', 'hailtone_surname', 'User', 'hailtone_username', 'call_' || substr(replace(callee_id::text, '-', ''), 1, 20))
+from call_test_ids
+union all select unrelated_id, unrelated_id::text || '@call-test.invalid', now(),
+    '+1555' || substr(translate(md5(unrelated_id::text), 'abcdef', '012345'), 1, 10), now(),
+    jsonb_build_object('hailtone_name', 'Call', 'hailtone_surname', 'User', 'hailtone_username', 'call_' || substr(replace(unrelated_id::text, '-', ''), 1, 20))
+from call_test_ids;
 
 do $$
 declare

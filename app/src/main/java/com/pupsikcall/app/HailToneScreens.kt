@@ -476,6 +476,9 @@ internal fun HailToneProfileScreen(
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.padding(top = HailToneSpacing.medium),
                 )
+                state.profile.username?.let { username ->
+                    Text("@$username", color = palette.bronze, style = MaterialTheme.typography.bodyMedium)
+                }
                 Spacer(Modifier.height(HailToneSpacing.xLarge))
                 OutlinedTextField(
                     value = displayName,
@@ -530,6 +533,77 @@ internal fun HailToneProfileScreen(
                 )
                 Spacer(Modifier.height(HailToneSpacing.large))
                 TextButton(onClick = onLogout, modifier = Modifier.padding(bottom = HailToneSpacing.large)) { Text(stringResource(R.string.sign_out), color = palette.danger) }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun HailToneIdentityCompletionScreen(
+    profile: UserProfile?,
+    profileState: AuthenticatedProfileState,
+    phoneState: PhoneVerificationState,
+    initialPhone: String?,
+    onLoadPhone: suspend () -> Unit,
+    onRequestPhone: suspend (String) -> Unit,
+    onResendPhone: suspend () -> Unit,
+    onVerifyPhone: suspend (String) -> Unit,
+    phoneResendCooldownSeconds: () -> Int,
+    onRetry: () -> Unit,
+    onLogout: () -> Unit,
+) {
+    val palette = LocalHailTonePalette.current
+    LaunchedEffect(profile?.userId) {
+        if (profile != null) onLoadPhone()
+    }
+    Column(
+        Modifier.fillMaxSize().background(palette.background).verticalScroll(rememberScrollState())
+            .padding(horizontal = HailToneSpacing.large),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        if (profile == null) {
+            when (profileState) {
+                AuthenticatedProfileState.Loading -> {
+                    Spacer(Modifier.height(HailToneSpacing.section))
+                    CircularProgressIndicator(color = palette.bronze)
+                }
+                AuthenticatedProfileState.SignedOut -> ProfileMessage(
+                    stringResource(R.string.profile_signed_out), stringResource(R.string.sign_out), onLogout,
+                )
+                is AuthenticatedProfileState.MissingProfile -> ProfileMessage(
+                    stringResource(R.string.profile_missing), stringResource(R.string.profile_retry), onRetry,
+                )
+                is AuthenticatedProfileState.Error -> ProfileMessage(
+                    stringResource(R.string.profile_error), stringResource(R.string.profile_retry), onRetry,
+                )
+                is AuthenticatedProfileState.Profile -> ProfileMessage(
+                    stringResource(R.string.profile_loading), stringResource(R.string.profile_retry), onRetry,
+                )
+            }
+            TextButton(onClick = onLogout, modifier = Modifier.padding(vertical = HailToneSpacing.large)) {
+                Text(stringResource(R.string.sign_out), color = palette.danger)
+            }
+        } else {
+            Spacer(Modifier.height(HailToneSpacing.section))
+            Text(stringResource(R.string.registration_complete_identity), color = palette.text, style = MaterialTheme.typography.headlineSmall)
+            Text("@${profile.username.orEmpty()}", color = palette.bronze, style = MaterialTheme.typography.titleMedium)
+            Text(
+                stringResource(R.string.registration_verify_phone_required),
+                color = palette.muted,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = HailToneSpacing.medium),
+            )
+            PhoneVerificationSection(
+                state = phoneState,
+                onLoad = onLoadPhone,
+                onRequest = onRequestPhone,
+                onResend = onResendPhone,
+                onVerify = onVerifyPhone,
+                resendCooldownSeconds = phoneResendCooldownSeconds,
+                initialPhone = initialPhone,
+            )
+            TextButton(onClick = onLogout, modifier = Modifier.padding(vertical = HailToneSpacing.large)) {
+                Text(stringResource(R.string.sign_out), color = palette.danger)
             }
         }
     }

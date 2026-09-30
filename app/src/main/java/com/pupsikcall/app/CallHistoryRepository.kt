@@ -278,12 +278,15 @@ private class SupabaseCallHistoryGateway(
     private suspend fun loadPublicProfiles(supabase: SupabaseClient, userIds: List<UUID>): Map<UUID, PublicCallProfile> {
         if (userIds.isEmpty()) return emptyMap()
         return userIds.chunked(PublicProfileLookupLimit).flatMap { chunk ->
-            supabase.postgrest.rpc(
+            val profiles = supabase.postgrest.rpc(
                 "get_public_profiles",
                 buildJsonObject { put("p_user_ids", JsonArray(chunk.map { JsonPrimitive(it.toString()) })) },
-            ).decodeList<JsonObject>().mapNotNull { row ->
-                val userId = row.uuidOrNull("user_id") ?: return@mapNotNull null
-                userId to PublicCallProfile(row.stringOrNull("display_name"), row.stringOrNull("avatar_path"))
+            ).decodeList<JsonObject>()
+            chunk.zip(profiles).mapNotNull { (userId, row) ->
+                val username = row.stringOrNull("username")
+                val avatarPath = row.stringOrNull("avatar_path")
+                if (username == null && avatarPath == null) return@mapNotNull null
+                userId to PublicCallProfile(username?.let { "@$it" }, avatarPath)
             }
         }.toMap()
     }

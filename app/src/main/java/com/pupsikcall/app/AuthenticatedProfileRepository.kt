@@ -30,13 +30,20 @@ internal data class UserProfile(
     val userId: UUID,
     val displayName: String?,
     val avatarPath: String?,
+    val name: String? = null,
+    val surname: String? = null,
+    val username: String? = null,
+    val identityRequired: Boolean = false,
+    val identityComplete: Boolean = false,
 )
 
 internal data class AuthenticatedUserIdentity(
     val userId: UUID,
 )
 
-internal val AUTHENTICATED_PROFILE_COLUMNS = listOf("user_id", "display_name", "avatar_path")
+internal val AUTHENTICATED_PROFILE_COLUMNS = listOf(
+    "user_id", "display_name", "avatar_path", "name", "surname", "username", "identity_required", "identity_complete",
+)
 
 internal sealed interface AuthenticatedProfileState {
     data object Loading : AuthenticatedProfileState
@@ -59,6 +66,16 @@ internal sealed interface AuthenticatedProfileState {
     ) : AuthenticatedProfileState
 
     data object SignedOut : AuthenticatedProfileState
+}
+
+internal fun authenticatedProfileFor(
+    state: AuthenticatedProfileState,
+    authenticatedUserId: UUID?,
+): AuthenticatedProfileState.Profile? {
+    if (authenticatedUserId == null) return null
+    return (state as? AuthenticatedProfileState.Profile)?.takeIf {
+        it.identity.userId == authenticatedUserId && it.profile.userId == authenticatedUserId
+    }
 }
 
 internal enum class ProfileFailure {
@@ -234,6 +251,11 @@ private class SupabaseProfileGateway(private val client: SupabaseClient) : Profi
             userId = UUID.fromString(row.stringOrNull("user_id") ?: return null),
             displayName = row.stringOrNull("display_name"),
             avatarPath = row.stringOrNull("avatar_path"),
+            name = row.stringOrNull("name"),
+            surname = row.stringOrNull("surname"),
+            username = row.stringOrNull("username"),
+            identityRequired = row.booleanOrFalse("identity_required"),
+            identityComplete = row.booleanOrFalse("identity_complete"),
         )
     }
 
@@ -248,6 +270,9 @@ private class SupabaseProfileGateway(private val client: SupabaseClient) : Profi
 
     private fun JsonObject.stringOrNull(name: String): String? =
         (this[name] as? JsonPrimitive)?.contentOrNull
+
+    private fun JsonObject.booleanOrFalse(name: String): Boolean =
+        (this[name] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull() ?: false
 }
 
 private object UnavailableProfileGateway : ProfileGateway {

@@ -4,7 +4,15 @@
     <string name="checking_session">Checking session</string>
     <string name="register_title">Create your account</string>
     <string name="email">Email</string>
+    <string name="login_identifier">Email or verified phone</string>
     <string name="password">Password</string>
+    <string name="registration_name">Name</string>
+    <string name="registration_surname">Surname</string>
+    <string name="registration_username">Username</string>
+    <string name="registration_confirm_password">Confirm password</string>
+    <string name="registration_invalid_fields">Check the required fields, username format, and matching passwords.</string>
+    <string name="registration_complete_identity">Finish account verification</string>
+    <string name="registration_verify_phone_required">Confirm your email and verify your phone number to finish registration.</string>
     <string name="auth_confirmation_required">If this email can be registered, Supabase will send a confirmation link. Confirm it, then sign in.</string>
     <string name="auth_configuration_missing">Supabase Auth is not configured.</string>
     <string name="auth_session_restore_failed">Your session could not be restored. Sign in again.</string>

@@ -1,9 +1,17 @@
 begin;
 
-insert into auth.users (id, email)
+insert into auth.users (id, email, raw_user_meta_data)
 values
-    ('00000000-0000-4000-8000-000000000601', 'push-token-owner@example.test'),
-    ('00000000-0000-4000-8000-000000000602', 'push-token-other@example.test')
+    (
+        '00000000-0000-4000-8000-000000000601',
+        'push-token-owner@example.test',
+        jsonb_build_object('hailtone_name', 'Push', 'hailtone_surname', 'Owner', 'hailtone_username', 'push_owner')
+    ),
+    (
+        '00000000-0000-4000-8000-000000000602',
+        'push-token-other@example.test',
+        jsonb_build_object('hailtone_name', 'Push', 'hailtone_surname', 'Other', 'hailtone_username', 'push_other')
+    )
 on conflict (id) do nothing;
 
 do $$

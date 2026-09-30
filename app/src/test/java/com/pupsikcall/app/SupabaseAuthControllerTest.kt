@@ -64,6 +64,37 @@ class SupabaseAuthControllerTest {
     }
 
     @Test
+    fun registrationRequiresAllIdentityFieldsAndMatchingPasswords() {
+        val valid = RegistrationInput(
+            name = "Ada",
+            surname = "Lovelace",
+            username = "Ada_L",
+            email = "ada@example.test",
+            phone = "+1 202 555 0123",
+            password = "StrongPassword1!",
+            confirmPassword = "StrongPassword1!",
+        )
+
+        assertNull(validateRegistration(valid))
+        assertEquals("ada_l", normalizeHailToneUsername(valid.username))
+        assertEquals(RegistrationValidationError.PASSWORD_MISMATCH, validateRegistration(valid.copy(confirmPassword = "different")))
+        assertEquals(RegistrationValidationError.NAME_REQUIRED, validateRegistration(valid.copy(name = " ")))
+        assertEquals(RegistrationValidationError.SURNAME_REQUIRED, validateRegistration(valid.copy(surname = " ")))
+        assertEquals(RegistrationValidationError.USERNAME_INVALID, validateRegistration(valid.copy(username = "ab")))
+        assertEquals(RegistrationValidationError.USERNAME_INVALID, validateRegistration(valid.copy(username = "admin")))
+        assertEquals(RegistrationValidationError.EMAIL_INVALID, validateRegistration(valid.copy(email = "not-email")))
+        assertEquals(RegistrationValidationError.PHONE_INVALID, validateRegistration(valid.copy(phone = "2025550123")))
+    }
+
+    @Test
+    fun onlySupabaseEmailAndVerifiedPhoneIdentifiersAreAcceptedForPasswordLogin() {
+        assertEquals(LoginIdentifierKind.EMAIL, loginIdentifierKind(" User@example.test "))
+        assertEquals(LoginIdentifierKind.VERIFIED_PHONE, loginIdentifierKind("+1 202 555 0123"))
+        assertNull(loginIdentifierKind("@ada_l"))
+        assertNull(loginIdentifierKind("not-an-identifier"))
+    }
+
+    @Test
     fun authFailuresUseSafeMessagesWithoutEchoingPasswordsOrTokens() {
         val failure = IllegalStateException("password=never-show access_token=never-show refresh_token=never-show")
         val message = sanitizedAuthError(AuthAction.LOGIN, failure)
@@ -75,7 +106,7 @@ class SupabaseAuthControllerTest {
             authRestErrorMessage(AuthAction.REGISTER, AuthErrorCode.WeakPassword),
         )
         assertEquals(
-            AuthMessage.DUPLICATE_ACCOUNT,
+            AuthMessage.REGISTER_FAILED,
             authRestErrorMessage(AuthAction.REGISTER, AuthErrorCode.UserAlreadyExists),
         )
     }

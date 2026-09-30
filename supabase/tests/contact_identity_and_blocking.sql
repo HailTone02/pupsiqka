@@ -6,14 +6,22 @@ select gen_random_uuid() as owner_id,
        gen_random_uuid() as unrelated_id,
        gen_random_uuid() as unverified_id;
 
-insert into auth.users (id, email, phone, phone_confirmed_at)
-select owner_id, owner_id::text || '@contact-test.invalid', '+15550000001', now() from contact_identity_test_ids
+insert into auth.users (id, email, email_confirmed_at, phone, phone_confirmed_at, raw_user_meta_data)
+select owner_id, owner_id::text || '@contact-test.invalid', now(), '+15550000001', now(),
+       jsonb_build_object('hailtone_name', 'Contact', 'hailtone_surname', 'Owner', 'hailtone_username', 'contact_' || substr(replace(owner_id::text, '-', ''), 1, 20))
+from contact_identity_test_ids
 union all
-select peer_id, peer_id::text || '@contact-test.invalid', '+15550000002', now() from contact_identity_test_ids
+select peer_id, peer_id::text || '@contact-test.invalid', now(), '+15550000002', now(),
+       jsonb_build_object('hailtone_name', 'Contact', 'hailtone_surname', 'Peer', 'hailtone_username', 'contact_' || substr(replace(peer_id::text, '-', ''), 1, 20))
+from contact_identity_test_ids
 union all
-select unrelated_id, unrelated_id::text || '@contact-test.invalid', '+15550000003', now() from contact_identity_test_ids
+select unrelated_id, unrelated_id::text || '@contact-test.invalid', now(), '+15550000003', now(),
+       jsonb_build_object('hailtone_name', 'Contact', 'hailtone_surname', 'Unrelated', 'hailtone_username', 'contact_' || substr(replace(unrelated_id::text, '-', ''), 1, 20))
+from contact_identity_test_ids
 union all
-select unverified_id, unverified_id::text || '@contact-test.invalid', null, null from contact_identity_test_ids;
+select unverified_id, unverified_id::text || '@contact-test.invalid', now(), null, null,
+       jsonb_build_object('hailtone_name', 'Contact', 'hailtone_surname', 'Unverified', 'hailtone_username', 'contact_' || substr(replace(unverified_id::text, '-', ''), 1, 20))
+from contact_identity_test_ids;
 
 update public.profiles
 set display_name = case user_id
@@ -34,17 +42,17 @@ select set_config('test.contact.owner', owner_id::text, true),
 from contact_identity_test_ids;
 
 insert into public.hailtone_message_devices (owner_user_id, device_id, matrix_user_id, device_keys)
-select owner_id, 'contact-owner-device', public.hailtone_matrix_user_id(owner_id),
+select owner_id, 'contact-owner-device', '@' || owner_id::text || ':hailtone.invalid',
        jsonb_build_object(
-           'user_id', public.hailtone_matrix_user_id(owner_id),
+           'user_id', '@' || owner_id::text || ':hailtone.invalid',
            'device_id', 'contact-owner-device',
            'keys', jsonb_build_object('ed25519:contact-owner-device', 'owner-ed25519', 'curve25519:contact-owner-device', 'owner-curve25519')
        )
 from contact_identity_test_ids
 union all
-select peer_id, 'contact-peer-device', public.hailtone_matrix_user_id(peer_id),
+select peer_id, 'contact-peer-device', '@' || peer_id::text || ':hailtone.invalid',
        jsonb_build_object(
-           'user_id', public.hailtone_matrix_user_id(peer_id),
+           'user_id', '@' || peer_id::text || ':hailtone.invalid',
            'device_id', 'contact-peer-device',
            'keys', jsonb_build_object('ed25519:contact-peer-device', 'peer-ed25519', 'curve25519:contact-peer-device', 'peer-curve25519')
        )
@@ -67,7 +75,7 @@ begin
         raise exception 'contact directory RPC accepts caller-supplied lookup parameters';
     end if;
     if pg_get_function_result('public.list_hailtone_contacts()'::regprocedure)
-        <> 'TABLE(contact_invite_id uuid, contact_user_id uuid, display_name text, avatar_path text, blocked_by_me boolean, blocked_me boolean)' then
+        <> 'TABLE(contact_invite_id uuid, contact_user_id uuid, display_name text, username text, avatar_path text, blocked_by_me boolean, blocked_me boolean)' then
         raise exception 'contact directory RPC exposes an unexpected result projection';
     end if;
 end;
@@ -196,7 +204,7 @@ begin
         'contact-peer-device',
         'm.room.encrypted',
         jsonb_build_object(
-            public.hailtone_matrix_user_id(current_setting('test.contact.owner')::uuid),
+            '@' || current_setting('test.contact.owner') || ':hailtone.invalid',
             jsonb_build_object('contact-owner-device', jsonb_build_object('algorithm', 'm.olm.v1.curve25519-aes-sha2', 'ciphertext', '{}'::jsonb))
         )
     );
@@ -206,7 +214,7 @@ begin
     where contact_row.contact_user_id = current_setting('test.contact.owner')::uuid;
     if linked_contact is null
         or coalesce((select array_agg(key order by key) from jsonb_object_keys(linked_contact) as keys(key)), array[]::text[])
-            <> array['avatar_path', 'blocked_by_me', 'blocked_me', 'contact_invite_id', 'contact_user_id', 'display_name']::text[]
+            <> array['avatar_path', 'blocked_by_me', 'blocked_me', 'contact_invite_id', 'contact_user_id', 'display_name', 'username']::text[]
         or linked_contact ->> 'blocked_by_me' <> 'false'
         or linked_contact ->> 'blocked_me' <> 'false'
         or linked_contact ?| array['phone', 'email', 'access_token', 'invitation_code'] then
@@ -290,7 +298,7 @@ begin
             'contact-peer-device',
             'm.room.encrypted',
             jsonb_build_object(
-                public.hailtone_matrix_user_id(current_setting('test.contact.owner')::uuid),
+                '@' || current_setting('test.contact.owner') || ':hailtone.invalid',
                 jsonb_build_object('contact-owner-device', jsonb_build_object('algorithm', 'm.olm.v1.curve25519-aes-sha2', 'ciphertext', '{}'::jsonb))
             )
         );

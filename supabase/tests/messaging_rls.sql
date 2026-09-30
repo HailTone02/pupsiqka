@@ -3,12 +3,21 @@ begin;
 create temporary table secure_messaging_test_ids on commit drop as
 select gen_random_uuid() as user_a, gen_random_uuid() as user_b, gen_random_uuid() as user_c;
 
-insert into auth.users (id, email)
-select user_a, user_a::text || '@secure-messaging-test.invalid' from secure_messaging_test_ids
+insert into auth.users (id, email, email_confirmed_at, phone, phone_confirmed_at, raw_user_meta_data)
+select user_a, user_a::text || '@secure-messaging-test.invalid', now(),
+       '+1555' || substr(translate(md5(user_a::text), 'abcdef', '012345'), 1, 10), now(),
+       jsonb_build_object('hailtone_name', 'Message', 'hailtone_surname', 'User', 'hailtone_username', 'message_' || substr(replace(user_a::text, '-', ''), 1, 20))
+from secure_messaging_test_ids
 union all
-select user_b, user_b::text || '@secure-messaging-test.invalid' from secure_messaging_test_ids
+select user_b, user_b::text || '@secure-messaging-test.invalid', now(),
+       '+1555' || substr(translate(md5(user_b::text), 'abcdef', '012345'), 1, 10), now(),
+       jsonb_build_object('hailtone_name', 'Message', 'hailtone_surname', 'User', 'hailtone_username', 'message_' || substr(replace(user_b::text, '-', ''), 1, 20))
+from secure_messaging_test_ids
 union all
-select user_c, user_c::text || '@secure-messaging-test.invalid' from secure_messaging_test_ids;
+select user_c, user_c::text || '@secure-messaging-test.invalid', now(),
+       '+1555' || substr(translate(md5(user_c::text), 'abcdef', '012345'), 1, 10), now(),
+       jsonb_build_object('hailtone_name', 'Message', 'hailtone_surname', 'User', 'hailtone_username', 'message_' || substr(replace(user_c::text, '-', ''), 1, 20))
+from secure_messaging_test_ids;
 
 do $$
 declare
@@ -31,14 +40,19 @@ end;
 $$;
 
 insert into public.hailtone_message_devices (owner_user_id, device_id, matrix_user_id, device_keys)
-select user_a, 'device-a', public.hailtone_matrix_user_id(user_a),
-       jsonb_build_object('user_id', public.hailtone_matrix_user_id(user_a), 'device_id', 'device-a',
+select user_a, 'device-a', '@' || user_a::text || ':hailtone.invalid',
+       jsonb_build_object('user_id', '@' || user_a::text || ':hailtone.invalid', 'device_id', 'device-a',
            'keys', jsonb_build_object('ed25519:device-a', 'test-public-key-a', 'curve25519:device-a', 'test-curve-key-a'))
 from secure_messaging_test_ids
 union all
-select user_b, 'device-b', public.hailtone_matrix_user_id(user_b),
-       jsonb_build_object('user_id', public.hailtone_matrix_user_id(user_b), 'device_id', 'device-b',
+select user_b, 'device-b', '@' || user_b::text || ':hailtone.invalid',
+       jsonb_build_object('user_id', '@' || user_b::text || ':hailtone.invalid', 'device_id', 'device-b',
            'keys', jsonb_build_object('ed25519:device-b', 'test-public-key-b', 'curve25519:device-b', 'test-curve-key-b'))
+from secure_messaging_test_ids
+union all
+select user_c, 'device-c', '@' || user_c::text || ':hailtone.invalid',
+       jsonb_build_object('user_id', '@' || user_c::text || ':hailtone.invalid', 'device_id', 'device-c',
+           'keys', jsonb_build_object('ed25519:device-c', 'test-public-key-c', 'curve25519:device-c', 'test-curve-key-c'))
 from secure_messaging_test_ids;
 
 select set_config('test.secure.user_a', user_a::text, true),
@@ -50,7 +64,9 @@ select set_config('request.jwt.claim.sub', current_setting('test.secure.user_a')
 set local role authenticated;
 do $$
 declare
+    user_a uuid := current_setting('test.secure.user_a')::uuid;
     user_b uuid := current_setting('test.secure.user_b')::uuid;
+    user_c uuid := current_setting('test.secure.user_c')::uuid;
     conversation_id uuid;
     duplicate_id uuid;
     fixture_client_id uuid := gen_random_uuid();
@@ -85,13 +101,45 @@ begin
         'device-a',
         'm.room.encrypted',
         jsonb_build_object(
-            public.hailtone_matrix_user_id(user_b),
+            '@' || user_b::text || ':hailtone.invalid',
             jsonb_build_object('device-b', jsonb_build_object(
                 'algorithm', 'm.olm.v1.curve25519-aes-sha2',
                 'ciphertext', jsonb_build_object('opaque-key', jsonb_build_object('type', 0, 'body', 'opaque-ciphertext'))
             ))
         )
     );
+
+    begin
+        perform public.send_hailtone_olm_envelopes(
+            conversation_id, gen_random_uuid(), 'device-a', 'm.room.encrypted', '[]'::jsonb
+        );
+        raise exception 'malformed non-object envelope map was accepted';
+    exception when invalid_parameter_value then
+        null;
+    end;
+
+    begin
+        perform public.send_hailtone_olm_envelopes(
+            conversation_id, gen_random_uuid(), 'device-a', 'm.room.encrypted',
+            jsonb_build_object(
+                '@' || user_a::text || ':hailtone.invalid', '{}'::jsonb,
+                '@' || user_b::text || ':hailtone.invalid', '{}'::jsonb,
+                '@' || user_c::text || ':hailtone.invalid', '{}'::jsonb
+            )
+        );
+        raise exception 'oversized recipient map was accepted';
+    exception when invalid_parameter_value then
+        null;
+    end;
+
+    begin
+        perform public.send_hailtone_olm_envelopes(
+            conversation_id, gen_random_uuid(), 'device-a', 'm.room.encrypted', '{}'::jsonb
+        );
+        raise exception 'empty recipient map was accepted';
+    exception when invalid_parameter_value then
+        null;
+    end;
 end;
 $$;
 reset role;
@@ -104,18 +152,21 @@ select set_config('request.jwt.claim.sub', current_setting('test.secure.user_b')
 set local role authenticated;
 do $$
 declare
-    envelope public.hailtone_message_envelopes%rowtype;
     envelope_id uuid := current_setting('test.secure.envelope_id')::uuid;
+    envelope_event_type text;
+    envelope_ciphertext jsonb;
 begin
-    select * into envelope from public.fetch_hailtone_olm_envelopes('device-b') where id = envelope_id;
-    if envelope.id is null or envelope.event_type <> 'm.room.encrypted'
-       or envelope.ciphertext #>> '{ciphertext,opaque-key,body}' <> 'opaque-ciphertext' then
+    select fetched.event_type, fetched.ciphertext into envelope_event_type, envelope_ciphertext
+    from public.fetch_hailtone_olm_envelopes('device-b') as fetched
+    where fetched.id = envelope_id;
+    if envelope_event_type <> 'm.room.encrypted'
+       or envelope_ciphertext #>> '{ciphertext,opaque-key,body}' <> 'opaque-ciphertext' then
         raise exception 'recipient did not receive a ciphertext-only envelope';
     end if;
     if not public.ack_hailtone_olm_envelope(envelope_id, 'device-b') then
         raise exception 'recipient ACK did not remove envelope';
     end if;
-    if exists (select 1 from public.hailtone_message_envelopes where id = envelope_id) then
+    if exists (select 1 from public.fetch_hailtone_olm_envelopes('device-b') where id = envelope_id) then
         raise exception 'ACKed envelope was retained';
     end if;
 end;
@@ -125,10 +176,25 @@ reset role;
 select set_config('request.jwt.claim.sub', current_setting('test.secure.user_c'), true);
 set local role authenticated;
 do $$
+declare
+    conversation_id uuid := current_setting('test.secure.conversation_id')::uuid;
+    user_b uuid := current_setting('test.secure.user_b')::uuid;
 begin
     if exists (select 1 from public.list_direct_conversations(null, null, 50)) then
         raise exception 'unlinked user listed conversations';
     end if;
+    begin
+        perform public.send_hailtone_olm_envelopes(
+            conversation_id, gen_random_uuid(), 'device-c', 'm.room.encrypted',
+            jsonb_build_object(
+                '@' || user_b::text || ':hailtone.invalid',
+                jsonb_build_object('device-b', jsonb_build_object('algorithm', 'm.olm.v1.curve25519-aes-sha2', 'ciphertext', '{}'::jsonb))
+            )
+        );
+        raise exception 'non-contact sender submitted a message envelope';
+    exception when insufficient_privilege then
+        null;
+    end;
 end;
 $$;
 reset role;
@@ -144,7 +210,7 @@ begin
         perform public.send_hailtone_olm_envelopes(
             conversation_id, gen_random_uuid(), 'device-a', 'm.room.encrypted',
             jsonb_build_object(
-                public.hailtone_matrix_user_id(current_setting('test.secure.user_b')::uuid),
+                '@' || current_setting('test.secure.user_b') || ':hailtone.invalid',
                 jsonb_build_object('device-b', jsonb_build_object('algorithm', 'm.olm.v1.curve25519-aes-sha2', 'ciphertext', '{}'::jsonb))
             )
         );
@@ -170,6 +236,9 @@ begin
        or has_function_privilege('anon', 'public.fetch_hailtone_olm_envelopes(text)', 'EXECUTE')
        or has_function_privilege('anon', 'public.ack_hailtone_olm_envelope(uuid,text)', 'EXECUTE') then
         raise exception 'anonymous role has secure messaging access';
+    end if;
+    if has_function_privilege('authenticated', 'public.hailtone_matrix_user_id(uuid)', 'EXECUTE') then
+        raise exception 'authenticated role can execute the private Matrix identity helper';
     end if;
 end;
 $$;

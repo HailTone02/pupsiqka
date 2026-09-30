@@ -138,6 +138,7 @@ internal class SupabaseHailToneContactDirectoryBackend(
             account = MatchedHailToneAccount(
                 userId = userId,
                 displayName = stringOrNull("display_name"),
+                username = stringOrNull("username"),
                 avatarPath = stringOrNull("avatar_path"),
                 blockedByMe = booleanOrFalse("blocked_by_me"),
                 blockedMe = booleanOrFalse("blocked_me"),

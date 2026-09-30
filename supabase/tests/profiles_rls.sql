@@ -1,9 +1,17 @@
 begin;
 
-insert into auth.users (id, email)
+insert into auth.users (id, email, raw_user_meta_data)
 values
-    ('00000000-0000-4000-8000-000000000101', 'profile-rls-owner@example.test'),
-    ('00000000-0000-4000-8000-000000000102', 'profile-rls-other@example.test')
+    (
+        '00000000-0000-4000-8000-000000000101',
+        'profile-rls-owner@example.test',
+        jsonb_build_object('hailtone_name', 'Owner', 'hailtone_surname', 'Profile', 'hailtone_username', 'profile_owner')
+    ),
+    (
+        '00000000-0000-4000-8000-000000000102',
+        'profile-rls-other@example.test',
+        jsonb_build_object('hailtone_name', 'Other', 'hailtone_surname', 'Profile', 'hailtone_username', 'profile_other')
+    )
 on conflict (id) do nothing;
 
 update public.profiles
@@ -62,10 +70,13 @@ begin
         or coalesce((
             select array_agg(profile_key order by profile_key)
             from jsonb_object_keys(public_profile) as profile_keys(profile_key)
-        ), array[]::text[]) <> array['avatar_path', 'display_name', 'user_id']::text[]
-        or public_profile ->> 'user_id' <> '00000000-0000-4000-8000-000000000102'
-        or public_profile ->> 'display_name' <> 'Other Profile'
-        or public_profile ?| array['email', 'phone', 'user_metadata', 'app_metadata', 'access_token'] then
+            ), array[]::text[]) <> array['avatar_path', 'username']::text[]
+        or public_profile ->> 'username' <> 'profile_other'
+        or public_profile ?| array[
+            'user_id', 'display_name', 'name', 'surname', 'email', 'phone',
+            'identity_required', 'identity_complete', 'confirmed_at', 'email_confirmed_at', 'phone_confirmed_at',
+            'user_metadata', 'app_metadata', 'access_token'
+        ] then
         raise exception 'public profile API returned an unexpected projection';
     end if;
 

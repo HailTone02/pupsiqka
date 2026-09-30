@@ -275,7 +275,7 @@ internal class AuthenticatedCallSignaling(
             buildJsonObject { put("p_user_ids", kotlinx.serialization.json.buildJsonArray { add(JsonPrimitive(userId.toString())) }) },
         ).decodeList<JsonObject>().singleOrNull()
         ensureSameUser(localId)
-        return row?.get("display_name")?.jsonPrimitive?.content
+        return row?.get("username")?.jsonPrimitive?.content?.let { "@$it" }
     }
 
     override fun close() {

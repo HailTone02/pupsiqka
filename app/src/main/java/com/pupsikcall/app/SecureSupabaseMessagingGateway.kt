@@ -407,12 +407,15 @@ internal class SecureSupabaseMessagingGateway(
 
     private suspend fun loadPublicProfiles(userIds: List<UUID>): List<UserProfile> {
         if (userIds.isEmpty()) return emptyList()
-        return requireClient().postgrest.rpc(
+        val profiles = requireClient().postgrest.rpc(
             "get_public_profiles",
             buildJsonObject { put("p_user_ids", JsonArray(userIds.map { JsonPrimitive(it.toString()) })) },
-        ).decodeList<JsonObject>().mapNotNull { row ->
-            val id = row.string("user_id")?.uuidOrNull() ?: return@mapNotNull null
-            UserProfile(id, row.string("display_name"), row.string("avatar_path"))
+        ).decodeList<JsonObject>()
+        return userIds.zip(profiles).mapNotNull { (userId, row) ->
+            val username = row.string("username")
+            val avatarPath = row.string("avatar_path")
+            if (username == null && avatarPath == null) return@mapNotNull null
+            UserProfile(userId, username?.let { "@$it" }, avatarPath)
         }
     }
 

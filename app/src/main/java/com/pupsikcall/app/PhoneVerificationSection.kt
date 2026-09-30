@@ -42,10 +42,11 @@ internal fun PhoneVerificationSection(
     onResend: suspend () -> Unit,
     onVerify: suspend (String) -> Unit,
     resendCooldownSeconds: () -> Int,
+    initialPhone: String? = null,
 ) {
     val palette = LocalHailTonePalette.current
     val scope = rememberCoroutineScope()
-    var phoneInput by remember { mutableStateOf("") }
+    var phoneInput by remember { mutableStateOf(initialPhone.orEmpty()) }
     var otpInput by remember { mutableStateOf("") }
     var changingNumber by remember { mutableStateOf(false) }
     var remainingCooldownSeconds by remember { mutableIntStateOf(0) }
@@ -62,6 +63,10 @@ internal fun PhoneVerificationSection(
         } else {
             remainingCooldownSeconds = 0
         }
+    }
+
+    LaunchedEffect(initialPhone) {
+        if (!initialPhone.isNullOrBlank() && phoneInput.isBlank()) phoneInput = initialPhone
     }
 
     LaunchedEffect(state) {

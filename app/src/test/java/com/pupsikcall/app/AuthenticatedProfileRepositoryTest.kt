@@ -1,9 +1,13 @@
 package com.pupsikcall.app
 
 import io.github.jan.supabase.auth.status.SessionStatus
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -13,8 +17,87 @@ import java.util.UUID
 
 class AuthenticatedProfileRepositoryTest {
     @Test
+    fun accountAProfileCannotSatisfyAccountBGate() {
+        val accountA = UUID.fromString("00000000-0000-4000-8000-000000000021")
+        val accountB = UUID.fromString("00000000-0000-4000-8000-000000000022")
+        val profileA = profileState(accountA)
+
+        assertNull(authenticatedProfileFor(profileA, accountB))
+        assertEquals(profileA, authenticatedProfileFor(profileA, accountA))
+    }
+
+    @Test
+    fun lateAccountAProfileReloadIsIgnoredAfterSwitchingToB() = runBlocking {
+        val accountA = UUID.fromString("00000000-0000-4000-8000-000000000023")
+        val accountB = UUID.fromString("00000000-0000-4000-8000-000000000024")
+        val profileA = UserProfile(accountA, "Account A", null)
+        val profileB = UserProfile(accountB, "Account B", null)
+        val staleAResponse = CompletableDeferred<UserProfile?>()
+        var accountALoads = 0
+        val gateway = object : ProfileGateway {
+            override suspend fun load(userId: UUID): UserProfile? = when (userId) {
+                accountA -> if (++accountALoads == 1) profileA else staleAResponse.await()
+                accountB -> profileB
+                else -> null
+            }
+
+            override suspend fun updateDisplayName(userId: UUID, displayName: String): UserProfile? = null
+        }
+        val events = MutableSharedFlow<ProfileSessionEvent>(extraBufferCapacity = 1)
+        val repository = AuthenticatedProfileRepository(events, gateway, Dispatchers.Unconfined)
+
+        try {
+            events.emit(ProfileSessionEvent.Authenticated(accountA.toString(), "a@example.test"))
+            repository.state.first { it is AuthenticatedProfileState.Profile }
+            repository.reload()
+            yield()
+            events.emit(ProfileSessionEvent.Authenticated(accountB.toString(), "b@example.test"))
+            repository.state.first {
+                it is AuthenticatedProfileState.Profile && it.identity.userId == accountB
+            }
+            staleAResponse.complete(profileA)
+            yield()
+
+            val current = repository.state.value as AuthenticatedProfileState.Profile
+            assertEquals(accountB, current.identity.userId)
+            assertEquals(accountB, current.profile.userId)
+        } finally {
+            repository.close()
+        }
+    }
+
+    @Test
+    fun nullUnknownErrorAndMismatchedProfileStatesFailClosed() {
+        val accountId = UUID.fromString("00000000-0000-4000-8000-000000000025")
+        val otherId = UUID.fromString("00000000-0000-4000-8000-000000000026")
+        val mismatchedRow = AuthenticatedProfileState.Profile(
+            AuthenticatedUserIdentity(accountId),
+            null,
+            UserProfile(otherId, "Other", null),
+        )
+
+        assertNull(authenticatedProfileFor(profileState(accountId), null))
+        assertNull(authenticatedProfileFor(AuthenticatedProfileState.Loading, accountId))
+        assertNull(authenticatedProfileFor(AuthenticatedProfileState.SignedOut, accountId))
+        assertNull(authenticatedProfileFor(AuthenticatedProfileState.MissingProfile(AuthenticatedUserIdentity(accountId), null), accountId))
+        assertNull(authenticatedProfileFor(AuthenticatedProfileState.Error(AuthenticatedUserIdentity(accountId), null, ProfileFailure.LOAD_FAILED), accountId))
+        assertNull(authenticatedProfileFor(mismatchedRow, accountId))
+    }
+
+    @Test
+    fun matchingCurrentAuthUuidProfileSatisfiesGate() {
+        val accountId = UUID.fromString("00000000-0000-4000-8000-000000000027")
+        val profile = profileState(accountId)
+
+        assertEquals(profile, authenticatedProfileFor(profile, accountId))
+    }
+
+    @Test
     fun authenticatedProfileProjectionUsesOnlyColumnsGrantedByRls() {
-        assertEquals(listOf("user_id", "display_name", "avatar_path"), AUTHENTICATED_PROFILE_COLUMNS)
+        assertEquals(
+            listOf("user_id", "display_name", "avatar_path", "name", "surname", "username", "identity_required", "identity_complete"),
+            AUTHENTICATED_PROFILE_COLUMNS,
+        )
         assertFalse(AUTHENTICATED_PROFILE_COLUMNS.contains("created_at"))
         assertFalse(AUTHENTICATED_PROFILE_COLUMNS.contains("updated_at"))
     }
@@ -131,6 +214,12 @@ class AuthenticatedProfileRepositoryTest {
 
     private fun repository(gateway: FakeProfileGateway, vararg events: ProfileSessionEvent) =
         AuthenticatedProfileRepository(flowOf(*events), gateway)
+
+    private fun profileState(userId: UUID) = AuthenticatedProfileState.Profile(
+        identity = AuthenticatedUserIdentity(userId),
+        email = null,
+        profile = UserProfile(userId, "Profile", null),
+    )
 
     private class FakeProfileGateway(initial: UserProfile?) : ProfileGateway {
         private var profile = initial
