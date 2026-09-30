@@ -28,6 +28,7 @@ internal data class IncomingCallPushEvent(
 }
 
 internal data class StoredCallPushState(
+    val authenticatedUserId: UUID,
     val callerUserId: UUID,
     val status: AuthenticatedCallStatus,
 )
@@ -36,6 +37,7 @@ internal interface CallPushEventStore {
     fun read(callId: UUID): StoredCallPushState?
     fun write(callId: UUID, state: StoredCallPushState)
     fun remove(callId: UUID)
+    fun clearAll()
 }
 
 internal enum class CallNotificationTransition {
@@ -46,19 +48,27 @@ internal enum class CallNotificationTransition {
 
 internal class IncomingCallNotificationLifecycle(private val store: CallPushEventStore) {
     @Synchronized
-    fun apply(event: IncomingCallPushEvent, verifiedSession: AuthenticatedCallSession?): CallNotificationTransition {
+    fun apply(
+        event: IncomingCallPushEvent,
+        verifiedSession: AuthenticatedCallSession?,
+        authenticatedUserId: UUID?,
+    ): CallNotificationTransition {
         val previous = store.read(event.callId)
         if (verifiedSession == null || verifiedSession.callId != event.callId ||
-            verifiedSession.status != AuthenticatedCallStatus.RINGING
+            verifiedSession.status != AuthenticatedCallStatus.RINGING ||
+            incomingCallRoute(authenticatedUserId, verifiedSession) == null
         ) {
             store.remove(event.callId)
             return CallNotificationTransition.CANCEL
         }
-        if (previous?.callerUserId != null && previous.callerUserId != verifiedSession.callerUserId) {
-            return CallNotificationTransition.IGNORE
+        val verifiedUserId = authenticatedUserId ?: return CallNotificationTransition.CANCEL
+        if (previous != null && previous.authenticatedUserId != verifiedUserId) {
+            store.write(event.callId, StoredCallPushState(verifiedUserId, verifiedSession.callerUserId, verifiedSession.status))
+            return CallNotificationTransition.SHOW
         }
+        if (previous != null && previous.callerUserId != verifiedSession.callerUserId) return CallNotificationTransition.IGNORE
         if (previous?.status != AuthenticatedCallStatus.RINGING) {
-            store.write(event.callId, StoredCallPushState(verifiedSession.callerUserId, verifiedSession.status))
+            store.write(event.callId, StoredCallPushState(verifiedUserId, verifiedSession.callerUserId, verifiedSession.status))
             return CallNotificationTransition.SHOW
         }
         return CallNotificationTransition.IGNORE
@@ -73,6 +83,7 @@ internal enum class IncomingCallNotificationActionKind {
 internal data class IncomingCallNotificationAction(
     val callId: UUID,
     val callerUserId: UUID,
+    val authenticatedUserId: UUID,
     val kind: IncomingCallNotificationActionKind,
     val requestId: String,
 )
@@ -104,8 +115,8 @@ internal fun validateIncomingCallNotificationAction(
     pendingInvitations: List<AuthenticatedCallSession>,
     authenticatedUserId: UUID?,
 ): AuthenticatedCallSession? = pendingInvitations.firstOrNull { session ->
-    session.callId == action.callId && session.callerUserId == action.callerUserId &&
-        incomingCallRoute(authenticatedUserId, session) != null
+    action.authenticatedUserId == authenticatedUserId && session.callId == action.callId &&
+        session.callerUserId == action.callerUserId && incomingCallRoute(authenticatedUserId, session) != null
 }
 
 internal class SharedPreferencesCallPushEventStore(context: Context) : CallPushEventStore {
@@ -113,23 +124,30 @@ internal class SharedPreferencesCallPushEventStore(context: Context) : CallPushE
 
     override fun read(callId: UUID): StoredCallPushState? {
         val prefix = "$ENTRY_PREFIX$callId."
+        val authenticatedUserId = preferences.getString(prefix + "user", null)
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() } ?: return null
         val callerId = preferences.getString(prefix + "caller", null)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
             ?: return null
         val status = AuthenticatedCallStatus.parse(preferences.getString(prefix + "status", null)) ?: return null
-        return StoredCallPushState(callerId, status)
+        return StoredCallPushState(authenticatedUserId, callerId, status)
     }
 
     override fun write(callId: UUID, state: StoredCallPushState) {
         val prefix = "$ENTRY_PREFIX$callId."
         preferences.edit()
+            .putString(prefix + "user", state.authenticatedUserId.toString())
             .putString(prefix + "caller", state.callerUserId.toString())
             .putString(prefix + "status", state.status.databaseValue)
-            .apply()
+            .commit()
     }
 
     override fun remove(callId: UUID) {
         val prefix = "$ENTRY_PREFIX$callId."
-        preferences.edit().remove(prefix + "caller").remove(prefix + "status").apply()
+        preferences.edit().remove(prefix + "user").remove(prefix + "caller").remove(prefix + "status").commit()
+    }
+
+    override fun clearAll() {
+        preferences.edit().clear().commit()
     }
 
     private companion object {
@@ -146,7 +164,35 @@ internal object IncomingCallNotificationManager {
     const val ACTION_OPEN = "com.pupsikcall.app.action.OPEN_INCOMING_CALL"
     const val EXTRA_CALL_ID = "pupsikcall.call_id"
     const val EXTRA_CALLER_ID = "pupsikcall.caller_user_id"
+    const val EXTRA_AUTHENTICATED_USER_ID = "pupsikcall.authenticated_user_id"
     const val EXTRA_REQUEST_ID = "pupsikcall.request_id"
+
+    private val accountLock = Any()
+
+    fun setAuthenticatedUser(context: Context, userId: UUID?) = synchronized(accountLock) {
+        val preferences = accountPreferences(context)
+        val nextUserId = userId?.toString()
+        if (preferences.getString(AUTHENTICATED_USER_ID_KEY, null) != nextUserId) {
+            clearIncomingCalls(context)
+            if (nextUserId == null) preferences.edit().remove(AUTHENTICATED_USER_ID_KEY).commit()
+            else preferences.edit().putString(AUTHENTICATED_USER_ID_KEY, nextUserId).commit()
+        }
+    }
+
+    fun clearSession(context: Context) = synchronized(accountLock) {
+        clearIncomingCalls(context)
+        accountPreferences(context).edit().remove(AUTHENTICATED_USER_ID_KEY).commit()
+    }
+
+    fun isCurrentAuthenticatedUser(context: Context, userId: UUID): Boolean = synchronized(accountLock) {
+        accountPreferences(context).getString(AUTHENTICATED_USER_ID_KEY, null) == userId.toString()
+    }
+
+    fun runIfCurrentAuthenticatedUser(context: Context, userId: UUID, action: () -> Unit): Boolean = synchronized(accountLock) {
+        if (accountPreferences(context).getString(AUTHENTICATED_USER_ID_KEY, null) != userId.toString()) return false
+        action()
+        true
+    }
 
     fun createChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -170,7 +216,8 @@ internal object IncomingCallNotificationManager {
         manager.createNotificationChannel(channel)
     }
 
-    fun showCall(context: Context, callId: UUID, callerUserId: UUID) {
+    fun showCall(context: Context, authenticatedUserId: UUID, callId: UUID, callerUserId: UUID) = synchronized(accountLock) {
+        if (accountPreferences(context).getString(AUTHENTICATED_USER_ID_KEY, null) != authenticatedUserId.toString()) return
         createChannel(context)
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.sym_action_call)
@@ -182,16 +229,16 @@ internal object IncomingCallNotificationManager {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setAutoCancel(false)
-            .setContentIntent(activityPendingIntent(context, callId, callerUserId, IncomingCallNotificationActionKind.ANSWER, ACTION_OPEN))
+            .setContentIntent(activityPendingIntent(context, callId, callerUserId, authenticatedUserId, IncomingCallNotificationActionKind.ANSWER, ACTION_OPEN))
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 context.getString(R.string.decline),
-                activityPendingIntent(context, callId, callerUserId, IncomingCallNotificationActionKind.DECLINE, ACTION_DECLINE),
+                activityPendingIntent(context, callId, callerUserId, authenticatedUserId, IncomingCallNotificationActionKind.DECLINE, ACTION_DECLINE),
             )
             .addAction(
                 android.R.drawable.sym_action_call,
                 context.getString(R.string.answer),
-                activityPendingIntent(context, callId, callerUserId, IncomingCallNotificationActionKind.ANSWER, ACTION_ANSWER),
+                activityPendingIntent(context, callId, callerUserId, authenticatedUserId, IncomingCallNotificationActionKind.ANSWER, ACTION_ANSWER),
             )
         try {
             NotificationManagerCompat.from(context).notify(callId.toString(), NOTIFICATION_ID, builder.build())
@@ -212,14 +259,35 @@ internal object IncomingCallNotificationManager {
         }
         val callId = intent.getStringExtra(EXTRA_CALL_ID)?.let { runCatching { UUID.fromString(it) }.getOrNull() } ?: return null
         val callerUserId = intent.getStringExtra(EXTRA_CALLER_ID)?.let { runCatching { UUID.fromString(it) }.getOrNull() } ?: return null
+        val authenticatedUserId = intent.getStringExtra(EXTRA_AUTHENTICATED_USER_ID)
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() } ?: return null
         val requestId = intent.getStringExtra(EXTRA_REQUEST_ID)?.takeIf(String::isNotBlank) ?: return null
-        return IncomingCallNotificationAction(callId, callerUserId, kind, requestId)
+        return IncomingCallNotificationAction(callId, callerUserId, authenticatedUserId, kind, requestId)
     }
+
+    private fun clearIncomingCalls(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.activeNotifications
+            .filter { notification ->
+                notification.id == NOTIFICATION_ID &&
+                    (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        notification.notification.channelId == CHANNEL_ID
+                    } else {
+                        notification.notification.category == Notification.CATEGORY_CALL
+                    })
+            }
+            .forEach { notification -> manager.cancel(notification.tag, notification.id) }
+        SharedPreferencesCallPushEventStore(context).clearAll()
+    }
+
+    private fun accountPreferences(context: Context): SharedPreferences =
+        context.getSharedPreferences(ACCOUNT_PREFERENCES_NAME, Context.MODE_PRIVATE)
 
     private fun activityPendingIntent(
         context: Context,
         callId: UUID,
         callerUserId: UUID,
+        authenticatedUserId: UUID,
         kind: IncomingCallNotificationActionKind,
         action: String,
     ): PendingIntent {
@@ -229,6 +297,7 @@ internal object IncomingCallNotificationManager {
             data = Uri.parse("pupsikcall://incoming/$callId/${kind.name.lowercase()}/$requestId")
             putExtra(EXTRA_CALL_ID, callId.toString())
             putExtra(EXTRA_CALLER_ID, callerUserId.toString())
+            putExtra(EXTRA_AUTHENTICATED_USER_ID, authenticatedUserId.toString())
             putExtra(EXTRA_REQUEST_ID, requestId)
             addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
@@ -239,4 +308,7 @@ internal object IncomingCallNotificationManager {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
     }
+
+    private const val ACCOUNT_PREFERENCES_NAME = "incoming_call_account"
+    private const val AUTHENTICATED_USER_ID_KEY = "authenticated_user_id"
 }

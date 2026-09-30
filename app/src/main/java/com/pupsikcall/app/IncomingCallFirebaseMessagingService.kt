@@ -18,16 +18,33 @@ internal class IncomingCallFirebaseMessagingService : FirebaseMessagingService()
             try {
                 withTimeout(10_000) {
                     val localUserId = signaling.awaitAuthenticatedUserId() ?: return@withTimeout
+                    if (!IncomingCallNotificationManager.isCurrentAuthenticatedUser(this@IncomingCallFirebaseMessagingService, localUserId)) {
+                        return@withTimeout
+                    }
                     val verifiedSession = signaling.loadPendingInvitations().firstOrNull { it.callId == event.callId }
                         ?.takeIf { incomingCallRoute(localUserId, it) != null }
-                    when (lifecycle.apply(event, verifiedSession)) {
-                        CallNotificationTransition.SHOW -> {
-                            val session = verifiedSession ?: return@withTimeout
-                            IncomingCallNotificationManager.showCall(this@IncomingCallFirebaseMessagingService, session.callId, session.callerUserId)
+                    val appliedForCurrentAccount = IncomingCallNotificationManager.runIfCurrentAuthenticatedUser(
+                        this@IncomingCallFirebaseMessagingService,
+                        localUserId,
+                    ) {
+                        when (lifecycle.apply(event, verifiedSession, localUserId)) {
+                            CallNotificationTransition.SHOW -> {
+                                val session = verifiedSession ?: return@runIfCurrentAuthenticatedUser
+                                IncomingCallNotificationManager.showCall(
+                                    this@IncomingCallFirebaseMessagingService,
+                                    localUserId,
+                                    session.callId,
+                                    session.callerUserId,
+                                )
+                            }
+                            CallNotificationTransition.CANCEL -> IncomingCallNotificationManager.cancel(
+                                this@IncomingCallFirebaseMessagingService,
+                                event.callId,
+                            )
+                            CallNotificationTransition.IGNORE -> Unit
                         }
-                        CallNotificationTransition.CANCEL -> IncomingCallNotificationManager.cancel(this@IncomingCallFirebaseMessagingService, event.callId)
-                        CallNotificationTransition.IGNORE -> Unit
                     }
+                    if (!appliedForCurrentAccount) return@withTimeout
                 }
             } catch (_: Exception) {
                 // A failed verification must never display a notification from unverified payload data.

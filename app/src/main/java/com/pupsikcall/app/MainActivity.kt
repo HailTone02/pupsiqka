@@ -270,7 +270,7 @@ private fun HailToneApp(
                         if (session.status == AuthenticatedCallStatus.RINGING &&
                             !(appInForeground && screen == DemoScreen.IncomingCall)
                         ) {
-                            IncomingCallNotificationManager.showCall(context, session.callId, session.callerUserId)
+                            IncomingCallNotificationManager.showCall(context, localUserId, session.callId, session.callerUserId)
                         } else {
                             IncomingCallNotificationManager.cancel(context, session.callId)
                         }
@@ -318,8 +318,7 @@ private fun HailToneApp(
                 }
 
                 override fun onAuthenticatedCallSessionLost() {
-                    currentCallId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
-                        ?.let { IncomingCallNotificationManager.cancel(context, it) }
+                    IncomingCallNotificationManager.clearSession(context)
                     outgoingRingback.stop()
                     incomingRingtone.stop()
                     autoAnswerController.cancel()
@@ -427,6 +426,7 @@ private fun HailToneApp(
 
     val logout: () -> Unit = {
         authScope.launch {
+            IncomingCallNotificationManager.clearSession(context)
             try {
                 pushTokenRegistrar.unregisterCurrentInstallation(signaling)
             } catch (_: Exception) {
@@ -635,7 +635,7 @@ private fun HailToneApp(
                         session?.status == AuthenticatedCallStatus.RINGING &&
                         session.calleeUserId == latestNotificationUserId
                     ) {
-                        IncomingCallNotificationManager.showCall(context, session.callId, session.callerUserId)
+                        IncomingCallNotificationManager.showCall(context, session.calleeUserId, session.callId, session.callerUserId)
                     }
                 }
                 else -> Unit
@@ -711,7 +711,11 @@ private fun HailToneApp(
         }
     }
 
-    LaunchedEffect(authState.phase, signaling, pushTokenRegistrar) {
+    LaunchedEffect(authenticatedUserId) {
+        IncomingCallNotificationManager.setAuthenticatedUser(context, authenticatedUserId)
+    }
+
+    LaunchedEffect(authState.phase, authenticatedUserId, signaling, pushTokenRegistrar) {
         if (authState.phase == AuthPhase.AUTHENTICATED) {
             try {
                 pushTokenRegistrar.registerCurrentToken(signaling)
@@ -758,13 +762,18 @@ private fun HailToneApp(
             foreground = appInForeground && screen == DemoScreen.IncomingCall &&
                 activeSession?.callId?.let { answerAttemptedCallId != it } == true,
         )
-        if (activeSession?.status == AuthenticatedCallStatus.RINGING &&
+        if (activeSession?.status == AuthenticatedCallStatus.RINGING && authenticatedLocalUserId != null &&
             activeSession.calleeUserId == authenticatedLocalUserId && currentCallId == activeSession.callId.toString()
         ) {
             if (appInForeground && screen == DemoScreen.IncomingCall) {
                 IncomingCallNotificationManager.cancel(context, activeSession.callId)
             } else {
-                IncomingCallNotificationManager.showCall(context, activeSession.callId, activeSession.callerUserId)
+                IncomingCallNotificationManager.showCall(
+                    context,
+                    authenticatedLocalUserId,
+                    activeSession.callId,
+                    activeSession.callerUserId,
+                )
             }
         }
         autoAnswerController.onAuthenticatedUserChanged(authenticatedUserId)
@@ -795,7 +804,7 @@ private fun HailToneApp(
         }
     }
 
-    LaunchedEffect(notificationAction?.requestId, authState.phase) {
+    LaunchedEffect(notificationAction?.requestId, authState.phase, authenticatedUserId) {
         val action = notificationAction ?: return@LaunchedEffect
         if (authState.phase != AuthPhase.AUTHENTICATED) return@LaunchedEffect
         autoAnswerController.onManualAction(
@@ -820,11 +829,13 @@ private fun HailToneApp(
         validatedNotificationAction = action
     }
 
-    LaunchedEffect(validatedNotificationAction, currentCallId, activeCallSession, screen) {
+    LaunchedEffect(validatedNotificationAction, currentCallId, activeCallSession, screen, authenticatedUserId) {
         val action = validatedNotificationAction ?: return@LaunchedEffect
         val session = activeCallSession
-        if (screen != DemoScreen.IncomingCall || currentCallId != action.callId.toString() ||
+        if (authenticatedUserId == null || signaling.authenticatedUserId() != authenticatedUserId ||
+            screen != DemoScreen.IncomingCall || currentCallId != action.callId.toString() ||
             session?.callId != action.callId || session.callerUserId != action.callerUserId ||
+            session.calleeUserId != authenticatedUserId ||
             session.status != AuthenticatedCallStatus.RINGING
         ) return@LaunchedEffect
         validatedNotificationAction = null

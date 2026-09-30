@@ -30,46 +30,63 @@ class IncomingCallNotificationsTest {
         val lifecycle = IncomingCallNotificationLifecycle(InMemoryCallPushEventStore())
         val ringing = session(AuthenticatedCallStatus.RINGING)
 
-        assertEquals(CallNotificationTransition.SHOW, lifecycle.apply(event(), ringing))
-        assertEquals(CallNotificationTransition.IGNORE, lifecycle.apply(event(), ringing))
+        assertEquals(CallNotificationTransition.SHOW, lifecycle.apply(event(), ringing, calleeId))
+        assertEquals(CallNotificationTransition.IGNORE, lifecycle.apply(event(), ringing, calleeId))
     }
 
     @Test
     fun laterTerminalEventCancelsNotificationAndStaleRingingCannotReshowIt() {
         val lifecycle = IncomingCallNotificationLifecycle(InMemoryCallPushEventStore())
 
-        assertEquals(CallNotificationTransition.SHOW, lifecycle.apply(event(), session(AuthenticatedCallStatus.RINGING)))
-        assertEquals(CallNotificationTransition.CANCEL, lifecycle.apply(event(), session(AuthenticatedCallStatus.CANCELLED)))
-        assertEquals(CallNotificationTransition.CANCEL, lifecycle.apply(event(), null))
+        assertEquals(CallNotificationTransition.SHOW, lifecycle.apply(event(), session(AuthenticatedCallStatus.RINGING), calleeId))
+        assertEquals(CallNotificationTransition.CANCEL, lifecycle.apply(event(), session(AuthenticatedCallStatus.CANCELLED), calleeId))
+        assertEquals(CallNotificationTransition.CANCEL, lifecycle.apply(event(), null, calleeId))
     }
 
     @Test
     fun acceptedAndFailedEventsCancelRingingNotification() {
         listOf(AuthenticatedCallStatus.ACCEPTED, AuthenticatedCallStatus.FAILED).forEach { terminalOrAccepted ->
             val lifecycle = IncomingCallNotificationLifecycle(InMemoryCallPushEventStore())
-            lifecycle.apply(event(), session(AuthenticatedCallStatus.RINGING))
+            lifecycle.apply(event(), session(AuthenticatedCallStatus.RINGING), calleeId)
 
-            assertEquals(CallNotificationTransition.CANCEL, lifecycle.apply(event(), session(terminalOrAccepted)))
+            assertEquals(CallNotificationTransition.CANCEL, lifecycle.apply(event(), session(terminalOrAccepted), calleeId))
         }
     }
 
     @Test
     fun changedCallerIdentityForSameCallIsRejected() {
         val lifecycle = IncomingCallNotificationLifecycle(InMemoryCallPushEventStore())
-        lifecycle.apply(event(), session(AuthenticatedCallStatus.RINGING))
+        lifecycle.apply(event(), session(AuthenticatedCallStatus.RINGING), calleeId)
         val changedCaller = session(AuthenticatedCallStatus.RINGING).copy(callerUserId = UUID.randomUUID())
 
-        assertEquals(CallNotificationTransition.IGNORE, lifecycle.apply(event(), changedCaller))
+        assertEquals(CallNotificationTransition.IGNORE, lifecycle.apply(event(), changedCaller, calleeId))
+    }
+
+    @Test
+    fun accountChangeDoesNotReusePreviousAccountsDuplicateEventState() {
+        val store = InMemoryCallPushEventStore()
+        val lifecycle = IncomingCallNotificationLifecycle(store)
+        val ringing = session(AuthenticatedCallStatus.RINGING)
+
+        assertEquals(CallNotificationTransition.SHOW, lifecycle.apply(event(), ringing, calleeId))
+        store.clearAll()
+        assertEquals(CallNotificationTransition.SHOW, lifecycle.apply(event(), ringing, calleeId))
+        val otherAccountId = UUID.fromString("e43fc877-3c0f-4fcf-8e2b-6b85fe3f1099")
+        assertEquals(
+            CallNotificationTransition.SHOW,
+            lifecycle.apply(event(), ringing.copy(calleeUserId = otherAccountId), otherAccountId),
+        )
     }
 
     @Test
     fun notificationAnswerAndDeclineRequireExactFreshAuthenticatedInvitation() {
         val session = session(AuthenticatedCallStatus.RINGING)
-        val answerAction = IncomingCallNotificationAction(callId, callerId, IncomingCallNotificationActionKind.ANSWER, "answer-once")
+        val answerAction = IncomingCallNotificationAction(callId, callerId, calleeId, IncomingCallNotificationActionKind.ANSWER, "answer-once")
         val declineAction = answerAction.copy(kind = IncomingCallNotificationActionKind.DECLINE)
 
         assertSame(session, validateIncomingCallNotificationAction(answerAction, listOf(session), calleeId))
         assertSame(session, validateIncomingCallNotificationAction(declineAction, listOf(session), calleeId))
+        assertNull(validateIncomingCallNotificationAction(answerAction, listOf(session), callerId))
         assertNull(validateIncomingCallNotificationAction(answerAction, listOf(session), UUID.randomUUID()))
         assertNull(validateIncomingCallNotificationAction(answerAction.copy(callerUserId = UUID.randomUUID()), listOf(session), calleeId))
         assertNull(validateIncomingCallNotificationAction(answerAction.copy(callId = UUID.randomUUID()), listOf(session), calleeId))
@@ -91,7 +108,7 @@ class IncomingCallNotificationsTest {
     @Test
     fun repeatedNotificationActionRequestIdCanBeClaimedOnlyOnce() {
         val gate = IncomingCallNotificationActionGate()
-        val action = IncomingCallNotificationAction(callId, callerId, IncomingCallNotificationActionKind.ANSWER, "once")
+        val action = IncomingCallNotificationAction(callId, callerId, calleeId, IncomingCallNotificationActionKind.ANSWER, "once")
 
         assertEquals(true, gate.claim(action))
         assertEquals(false, gate.claim(action))
@@ -125,6 +142,10 @@ class IncomingCallNotificationsTest {
 
         override fun remove(callId: UUID) {
             entries.remove(callId)
+        }
+
+        override fun clearAll() {
+            entries.clear()
         }
     }
 }
