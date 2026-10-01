@@ -107,6 +107,8 @@ dependencies {
     implementation("com.googlecode.libphonenumber:libphonenumber:8.13.55")
     implementation("io.github.jan-tennert.supabase:postgrest-kt:3.2.6")
     implementation("io.github.jan-tennert.supabase:realtime-kt:3.2.6")
+    implementation("io.github.jan-tennert.supabase:storage-kt:3.2.6")
+    implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("io.ktor:ktor-client-okhttp:3.3.1")
     testImplementation("junit:junit:4.13.2")
     testRuntimeOnly("net.java.dev.jna:jna:5.18.1")

@@ -18,6 +18,13 @@ internal data class HailToneContactLink(
 
 internal interface HailToneContactDirectoryBackend {
     suspend fun listLinkedContacts(): List<HailToneContactLink>
+    suspend fun searchAccounts(query: String): List<MatchedHailToneAccount>
+    suspend fun listContactRequests(): List<HailToneContactRequest>
+    suspend fun listBlockedContacts(): List<MatchedHailToneAccount>
+    suspend fun sendContactRequest(userId: UUID)
+    suspend fun acceptContactRequest(requestId: UUID)
+    suspend fun declineContactRequest(requestId: UUID)
+    suspend fun cancelContactRequest(requestId: UUID)
     suspend fun createInvite(): ContactInviteCapability
     suspend fun acceptInvite(code: String): HailToneContactLink
     suspend fun block(userId: UUID)
@@ -40,6 +47,21 @@ internal class HailToneContactDirectory(
             ?.account
     }
 
+    suspend fun listLinkedContacts(): List<HailToneContactLink> = requireBackend().listLinkedContacts()
+
+    suspend fun searchAccounts(query: String): List<MatchedHailToneAccount> =
+        requireBackend().searchAccounts(query.trim())
+
+    suspend fun listContactRequests(): List<HailToneContactRequest> = requireBackend().listContactRequests()
+
+    suspend fun sendContactRequest(userId: UUID) = requireBackend().sendContactRequest(userId)
+
+    suspend fun acceptContactRequest(requestId: UUID) = requireBackend().acceptContactRequest(requestId)
+
+    suspend fun declineContactRequest(requestId: UUID) = requireBackend().declineContactRequest(requestId)
+
+    suspend fun cancelContactRequest(requestId: UUID) = requireBackend().cancelContactRequest(requestId)
+
     suspend fun createInviteFor(contact: LocalPhoneContact): ContactInviteCapability {
         val invite = requireBackend().createInvite()
         associations.associateContact(contact.lookupKey, invite.invitationId)
@@ -54,22 +76,25 @@ internal class HailToneContactDirectory(
         return link
     }
 
-    suspend fun listBlockedContacts(): List<HailToneContactLink> =
-        requireBackend().listLinkedContacts().filter { it.account.blockedByMe }
+    suspend fun listBlockedContacts(): List<MatchedHailToneAccount> = requireBackend().listBlockedContacts()
 
     suspend fun blockResolvedContact(userId: UUID) {
-        requireLinkedUser(userId)
+        requireRelatedUser(userId)
         requireBackend().block(userId)
     }
 
     suspend fun unblockResolvedContact(userId: UUID) {
-        requireLinkedUser(userId)
+        require(requireBackend().listBlockedContacts().any { it.userId == userId }) {
+            "Blocked MeetTone account is unavailable"
+        }
         requireBackend().unblock(userId)
     }
 
-    private suspend fun requireLinkedUser(userId: UUID) {
-        require(requireBackend().listLinkedContacts().any { it.account.userId == userId }) {
-            "HailTone contact is unavailable"
+    private suspend fun requireRelatedUser(userId: UUID) {
+        val linked = requireBackend().listLinkedContacts().any { it.account.userId == userId }
+        val requested = requireBackend().listContactRequests().any { it.account.userId == userId }
+        require(linked || requested) {
+            "MeetTone contact or pending requester is unavailable"
         }
     }
 
@@ -84,6 +109,48 @@ internal class SupabaseHailToneContactDirectoryBackend(
         authenticatedClient().postgrest.rpc("list_hailtone_contacts")
             .decodeList<JsonObject>()
             .mapNotNull { it.toContactLink() }
+
+    override suspend fun searchAccounts(query: String): List<MatchedHailToneAccount> =
+        authenticatedClient().postgrest.rpc(
+            "search_hailtone_accounts",
+            buildJsonObject { put("p_query", JsonPrimitive(query)) },
+        ).decodeList<JsonObject>().mapNotNull { it.toAccount() }
+
+    override suspend fun listContactRequests(): List<HailToneContactRequest> =
+        authenticatedClient().postgrest.rpc("list_hailtone_contact_requests")
+            .decodeList<JsonObject>().mapNotNull { it.toContactRequest() }
+
+    override suspend fun listBlockedContacts(): List<MatchedHailToneAccount> =
+        authenticatedClient().postgrest.rpc("list_hailtone_blocked_users")
+            .decodeList<JsonObject>().mapNotNull { it.toAccount() }
+
+    override suspend fun sendContactRequest(userId: UUID) {
+        authenticatedClient().postgrest.rpc(
+            "send_hailtone_contact_request",
+            buildJsonObject { put("p_recipient_user_id", JsonPrimitive(userId.toString())) },
+        )
+    }
+
+    override suspend fun acceptContactRequest(requestId: UUID) {
+        authenticatedClient().postgrest.rpc(
+            "accept_hailtone_contact_request",
+            buildJsonObject { put("p_request_id", JsonPrimitive(requestId.toString())) },
+        )
+    }
+
+    override suspend fun declineContactRequest(requestId: UUID) {
+        authenticatedClient().postgrest.rpc(
+            "decline_hailtone_contact_request",
+            buildJsonObject { put("p_request_id", JsonPrimitive(requestId.toString())) },
+        )
+    }
+
+    override suspend fun cancelContactRequest(requestId: UUID) {
+        authenticatedClient().postgrest.rpc(
+            "cancel_hailtone_contact_request",
+            buildJsonObject { put("p_request_id", JsonPrimitive(requestId.toString())) },
+        )
+    }
 
     override suspend fun createInvite(): ContactInviteCapability {
         val row = authenticatedClient().postgrest.rpc("create_hailtone_contact_invite")
@@ -144,6 +211,29 @@ internal class SupabaseHailToneContactDirectoryBackend(
                 blockedMe = booleanOrFalse("blocked_me"),
             ),
         )
+    }
+
+    private fun JsonObject.toAccount(): MatchedHailToneAccount? =
+        uuidOrNull("user_id")?.let { userId ->
+            MatchedHailToneAccount(
+                userId = userId,
+                displayName = stringOrNull("display_name"),
+                username = stringOrNull("username"),
+                avatarPath = stringOrNull("avatar_path"),
+                blockedByMe = booleanOrFalse("blocked_by_me"),
+                blockedMe = booleanOrFalse("blocked_me"),
+            )
+        }
+
+    private fun JsonObject.toContactRequest(): HailToneContactRequest? {
+        val requestId = uuidOrNull("request_id") ?: return null
+        val account = toAccount() ?: return null
+        val direction = when (stringOrNull("direction")) {
+            "incoming" -> ContactRequestDirection.INCOMING
+            "outgoing" -> ContactRequestDirection.OUTGOING
+            else -> return null
+        }
+        return HailToneContactRequest(requestId, account, direction)
     }
 
     private fun JsonObject.uuidOrNull(key: String): UUID? =

@@ -2,11 +2,13 @@ package com.pupsikcall.app
 
 import com.google.i18n.phonenumbers.NumberParseException
 import com.google.i18n.phonenumbers.PhoneNumberUtil
+import io.github.jan.supabase.auth.exception.AuthRestException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
+import java.io.IOException
 
 internal data class PhoneAuthIdentity(
     val userId: String,
@@ -30,6 +32,10 @@ internal interface PhoneIdentityGateway {
 internal enum class PhoneVerificationError {
     INVALID_PHONE,
     REQUEST_FAILED,
+    NETWORK_FAILED,
+    RATE_LIMITED,
+    PROVIDER_CONFIGURATION_FAILED,
+    SUPABASE_REJECTED,
     CODE_INVALID_EXPIRED_OR_RATE_LIMITED,
     STATUS_CHECK_FAILED,
     SESSION_LOST,
@@ -189,8 +195,8 @@ internal class PhoneVerificationController(
             } catch (cancelled: CancellationException) {
                 if (generation == operationGeneration) restoreAfterCancellation()
                 throw cancelled
-            } catch (_: Exception) {
-                if (generation == operationGeneration) fail(PhoneVerificationError.REQUEST_FAILED)
+            } catch (failure: Exception) {
+                if (generation == operationGeneration) fail(phoneRequestFailure(failure))
             }
         } finally {
             operationMutex.unlock()
@@ -252,8 +258,8 @@ internal class PhoneVerificationController(
             } catch (cancelled: CancellationException) {
                 if (generation == operationGeneration) restoreAfterCancellation()
                 throw cancelled
-            } catch (_: Exception) {
-                if (generation == operationGeneration) fail(PhoneVerificationError.REQUEST_FAILED)
+            } catch (failure: Exception) {
+                if (generation == operationGeneration) fail(phoneRequestFailure(failure))
             }
         } finally {
             operationMutex.unlock()
@@ -300,7 +306,7 @@ internal class PhoneVerificationController(
                     resendAvailableAtMillis = 0
                     mutableState.value = PhoneVerificationState.Verified
                 } else {
-                    fail(PhoneVerificationError.CONFIRMATION_MISSING)
+                    fail(PhoneVerificationError.CODE_INVALID_EXPIRED_OR_RATE_LIMITED)
                 }
             } catch (cancelled: CancellationException) {
                 if (generation == operationGeneration) restoreAfterCancellation()
@@ -331,4 +337,21 @@ internal class PhoneVerificationController(
             PhoneVerificationState.AwaitingOtp
         }
     }
+}
+
+internal fun phoneRequestFailure(failure: Exception): PhoneVerificationError {
+    if (failure is AuthRestException) {
+        val code = failure.errorCode?.name.orEmpty()
+        return when {
+            code.contains("rate", ignoreCase = true) || code.contains("limit", ignoreCase = true) ->
+                PhoneVerificationError.RATE_LIMITED
+            code.contains("provider", ignoreCase = true) || code.contains("sms", ignoreCase = true) ->
+                PhoneVerificationError.PROVIDER_CONFIGURATION_FAILED
+            else -> PhoneVerificationError.SUPABASE_REJECTED
+        }
+    }
+    if (failure is IOException || failure::class.simpleName?.contains("Timeout", ignoreCase = true) == true) {
+        return PhoneVerificationError.NETWORK_FAILED
+    }
+    return PhoneVerificationError.REQUEST_FAILED
 }

@@ -55,6 +55,14 @@ internal data class MatchedHailToneAccount(
     val blockedMe: Boolean = false,
 )
 
+internal enum class ContactRequestDirection { INCOMING, OUTGOING }
+
+internal data class HailToneContactRequest(
+    val requestId: UUID,
+    val account: MatchedHailToneAccount,
+    val direction: ContactRequestDirection,
+)
+
 internal fun interface SelectedContactIdentityMatcher {
     suspend fun matchSelectedContact(contact: LocalPhoneContact): MatchedHailToneAccount?
 }

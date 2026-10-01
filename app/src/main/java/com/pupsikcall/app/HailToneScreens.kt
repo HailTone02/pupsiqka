@@ -1,5 +1,9 @@
 package com.pupsikcall.app
 
+import android.content.Context
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -58,6 +62,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -70,6 +75,8 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -84,6 +91,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import coil.compose.SubcomposeAsyncImage
+import coil.compose.SubcomposeAsyncImageContent
+import coil.compose.AsyncImagePainter
+import java.io.ByteArrayOutputStream
 import kotlin.math.roundToInt
 
 @Composable
@@ -207,9 +218,8 @@ internal fun HailToneSettingsScreen(
     profileState: AuthenticatedProfileState,
     onAutoAnswerEnabledChange: (Boolean) -> Unit,
     onAutoAnswerDelayChange: (AutoAnswerDelay) -> Unit,
-    onRemoveTrustedUser: (java.util.UUID) -> Unit,
-    verifiedContacts: List<HailToneContactLink>,
-    onTrustedContactChange: (java.util.UUID, Boolean) -> Unit,
+    onLoadBlockedContacts: suspend () -> List<MatchedHailToneAccount>,
+    onUnblockContact: suspend (java.util.UUID) -> Unit,
     languageCodes: List<String>,
     languageNames: List<String>,
     selectedLanguageIndex: Int,
@@ -223,6 +233,7 @@ internal fun HailToneSettingsScreen(
     val palette = LocalHailTonePalette.current
     val lightUi = palette == HailTonePalettes.Light
     val accountProfile = profileState as? AuthenticatedProfileState.Profile
+    var showBlockedContacts by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().background(palette.background)) {
         ScreenHeader(stringResource(R.string.settings))
         Column(
@@ -282,62 +293,23 @@ internal fun HailToneSettingsScreen(
                             )
                         }
                     }
-                    Text(
-                        stringResource(R.string.trusted_auto_answer_contacts),
-                        color = palette.text,
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(top = HailToneSpacing.large, bottom = HailToneSpacing.small),
-                    )
-                    Text(stringResource(R.string.trusted_auto_answer_explanation), color = palette.muted, style = MaterialTheme.typography.bodySmall)
-                    if (currentSettings.trustedAutoAnswerUserIds.isEmpty()) {
-                        Text(
-                            stringResource(R.string.trusted_auto_answer_empty),
-                            color = palette.muted,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(vertical = HailToneSpacing.medium),
-                        )
-                    }
-                    verifiedContacts.forEach { contact ->
-                        val userId = contact.account.userId
-                        Row(
-                            Modifier.fillMaxWidth().clip(HailToneShapes.control).background(palette.surface)
-                                .border(1.dp, palette.outline, HailToneShapes.control)
-                                .padding(horizontal = HailToneSpacing.medium, vertical = HailToneSpacing.xSmall),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(userId.toString(), color = palette.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                            Switch(
-                                checked = userId in currentSettings.trustedAutoAnswerUserIds,
-                                onCheckedChange = { trusted -> onTrustedContactChange(userId, trusted) },
-                            )
-                        }
-                    }
-                    val linkedUserIds = verifiedContacts.map { it.account.userId }.toSet()
-                    currentSettings.trustedAutoAnswerUserIds
-                        .filterNot { it in linkedUserIds }
-                        .sortedBy(java.util.UUID::toString)
-                        .forEach { userId ->
-                            Row(
-                                Modifier.fillMaxWidth().clip(HailToneShapes.control).background(palette.surface)
-                                    .border(1.dp, palette.outline, HailToneShapes.control)
-                                    .padding(horizontal = HailToneSpacing.medium, vertical = HailToneSpacing.xSmall),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(userId.toString(), color = palette.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                                TextButton(onClick = { onRemoveTrustedUser(userId) }) {
-                                    Text(stringResource(R.string.remove_trusted_contact), color = palette.danger)
-                                }
-                            }
-                        }
-                    if (verifiedContacts.isEmpty()) {
-                        Text(
-                            stringResource(R.string.trusted_auto_answer_unavailable),
-                            color = palette.muted,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(top = HailToneSpacing.small),
-                        )
-                    }
                 }
+            }
+            Text(
+                stringResource(R.string.contact_blocked_list),
+                color = palette.text,
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(top = HailToneSpacing.xLarge, bottom = HailToneSpacing.small),
+            )
+            Row(
+                Modifier.fillMaxWidth().clip(HailToneShapes.control).background(palette.surface)
+                    .border(1.dp, palette.outline, HailToneShapes.control)
+                    .clickable { showBlockedContacts = true }
+                    .padding(horizontal = HailToneSpacing.medium, vertical = HailToneSpacing.medium),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Person, contentDescription = null, tint = palette.bronze)
+                Text(stringResource(R.string.contact_blocked_list), color = palette.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = HailToneSpacing.medium))
             }
             Text(stringResource(R.string.language), color = palette.text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = HailToneSpacing.xLarge, bottom = HailToneSpacing.small))
             var languagesExpanded by remember { mutableStateOf(false) }
@@ -394,6 +366,13 @@ internal fun HailToneSettingsScreen(
         }
         HailToneBottomNavigation("settings", onOpenContacts, onOpenCalls, onOpenMessages, {})
     }
+    if (showBlockedContacts) {
+        HailToneBlockedContactsDialog(
+            onDismiss = { showBlockedContacts = false },
+            onLoad = onLoadBlockedContacts,
+            onUnblock = onUnblockContact,
+        )
+    }
 }
 
 @Composable
@@ -404,6 +383,8 @@ internal fun HailToneProfileScreen(
     onLogout: () -> Unit,
     onRetry: () -> Unit,
     onSaveDisplayName: suspend (String) -> ProfileUpdateResult,
+    onSaveUsername: suspend (String) -> ProfileUsernameUpdateResult,
+    onSavePhoto: suspend (String, ByteArray) -> ProfilePhotoUpdateResult,
     onLoadPhone: suspend () -> Unit,
     onRequestPhone: suspend (String) -> Unit,
     onResendPhone: suspend () -> Unit,
@@ -412,16 +393,35 @@ internal fun HailToneProfileScreen(
 ) {
     val palette = LocalHailTonePalette.current
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var displayName by rememberSaveable { mutableStateOf("") }
+    var username by rememberSaveable { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
+    var savingUsername by remember { mutableStateOf(false) }
+    var savingPhoto by remember { mutableStateOf(false) }
     var saveResult by remember { mutableStateOf<ProfileUpdateResult?>(null) }
+    var usernameResult by remember { mutableStateOf<ProfileUsernameUpdateResult?>(null) }
+    var photoResult by remember { mutableStateOf<ProfilePhotoUpdateResult?>(null) }
     val profile = (state as? AuthenticatedProfileState.Profile)?.profile
     val email = (state as? AuthenticatedProfileState.Profile)?.email
     LaunchedEffect(profile?.userId, profile?.displayName) {
         if (profile != null) displayName = profile.displayName.orEmpty()
     }
+    LaunchedEffect(profile?.userId, profile?.username) {
+        if (profile != null) username = profile.username.orEmpty()
+    }
     LaunchedEffect(profile?.userId) {
         if (profile != null) onLoadPhone()
+    }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) scope.launch {
+            savingPhoto = true
+            photoResult = runCatching { readProfilePhoto(context, uri) }
+                .getOrNull()
+                ?.let { (contentType, bytes) -> onSavePhoto(contentType, bytes) }
+                ?: ProfilePhotoUpdateResult.INVALID_PHOTO
+            savingPhoto = false
+        }
     }
     Column(Modifier.fillMaxSize().background(palette.background)) {
         Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -453,7 +453,39 @@ internal fun HailToneProfileScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Spacer(Modifier.height(HailToneSpacing.section))
-                HailToneAvatar(profileInitials(state.profile.displayName, email), 108.dp)
+                val avatarUrl = state.profile.avatarPath?.let { path ->
+                    "${BuildConfig.SUPABASE_URL}/storage/v1/object/public/$PROFILE_PHOTO_BUCKET/$path"
+                }
+                if (avatarUrl == null) {
+                    HailToneAvatar(profileInitials(state.profile.displayName, email), 108.dp)
+                } else {
+                    SubcomposeAsyncImage(
+                        model = avatarUrl,
+                        contentDescription = stringResource(R.string.profile_photo_description),
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(108.dp).clip(CircleShape),
+                    ) {
+                        if (painter.state is AsyncImagePainter.State.Success) SubcomposeAsyncImageContent()
+                        else HailToneAvatar(profileInitials(state.profile.displayName, email), 108.dp)
+                    }
+                }
+                TextButton(
+                    onClick = { photoPicker.launch("image/*") },
+                    enabled = !savingPhoto,
+                    modifier = Modifier.padding(top = HailToneSpacing.small),
+                ) {
+                    if (savingPhoto) CircularProgressIndicator(Modifier.size(16.dp), color = palette.bronze, strokeWidth = 2.dp)
+                    else Icon(Icons.Filled.Person, contentDescription = null, tint = palette.bronze)
+                    Text(stringResource(R.string.profile_change_photo), color = palette.bronze, modifier = Modifier.padding(start = HailToneSpacing.small))
+                }
+                photoResult?.let { result ->
+                    val resultText = when (result) {
+                        ProfilePhotoUpdateResult.UPDATED -> stringResource(R.string.profile_photo_saved)
+                        ProfilePhotoUpdateResult.INVALID_PHOTO -> stringResource(R.string.profile_photo_invalid)
+                        ProfilePhotoUpdateResult.NOT_AUTHENTICATED, ProfilePhotoUpdateResult.FAILED -> stringResource(R.string.profile_error)
+                    }
+                    Text(resultText, color = palette.muted, style = MaterialTheme.typography.bodySmall)
+                }
                 Text(
                     state.profile.displayName ?: stringResource(R.string.profile_name_not_set),
                     color = if (state.profile.displayName == null) palette.muted else palette.text,
@@ -501,6 +533,46 @@ internal fun HailToneProfileScreen(
                         ProfileUpdateResult.NOT_AUTHENTICATED -> stringResource(R.string.profile_signed_out)
                         ProfileUpdateResult.MISSING_PROFILE -> stringResource(R.string.profile_missing)
                         ProfileUpdateResult.FAILED -> stringResource(R.string.profile_error)
+                    }
+                    Text(resultText, color = palette.muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = HailToneSpacing.small))
+                }
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it; usernameResult = null },
+                    modifier = Modifier.fillMaxWidth().padding(top = HailToneSpacing.large),
+                    enabled = !savingUsername,
+                    label = { Text(stringResource(R.string.registration_username)) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = palette.bronze,
+                        unfocusedBorderColor = palette.outline,
+                        focusedTextColor = palette.text,
+                        unfocusedTextColor = palette.text,
+                        cursorColor = palette.bronze,
+                    ),
+                )
+                Button(
+                    onClick = {
+                        scope.launch {
+                            savingUsername = true
+                            usernameResult = onSaveUsername(username)
+                            savingUsername = false
+                        }
+                    },
+                    enabled = !savingUsername && username.trim().removePrefix("@").lowercase() != state.profile.username,
+                    modifier = Modifier.fillMaxWidth().padding(top = HailToneSpacing.small),
+                    colors = ButtonDefaults.buttonColors(containerColor = palette.bronze),
+                ) {
+                    if (savingUsername) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                    else Text(stringResource(R.string.save_profile))
+                }
+                usernameResult?.let { result ->
+                    val resultText = when (result) {
+                        ProfileUsernameUpdateResult.UPDATED -> stringResource(R.string.profile_username_saved)
+                        ProfileUsernameUpdateResult.INVALID -> stringResource(R.string.profile_invalid_username)
+                        ProfileUsernameUpdateResult.COOLDOWN -> stringResource(R.string.profile_username_cooldown)
+                        ProfileUsernameUpdateResult.TAKEN -> stringResource(R.string.profile_username_taken)
+                        ProfileUsernameUpdateResult.NOT_AUTHENTICATED, ProfileUsernameUpdateResult.FAILED -> stringResource(R.string.profile_error)
                     }
                     Text(resultText, color = palette.muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = HailToneSpacing.small))
                 }
@@ -591,6 +663,26 @@ internal fun HailToneIdentityCompletionScreen(
             }
         }
     }
+}
+
+private fun readProfilePhoto(context: Context, uri: Uri): Pair<String, ByteArray>? {
+    val contentType = context.contentResolver.getType(uri)?.lowercase()
+        ?.takeIf { it in setOf("image/jpeg", "image/png", "image/webp") }
+        ?: return null
+    val input = context.contentResolver.openInputStream(uri) ?: return null
+    val output = ByteArrayOutputStream()
+    input.use { stream ->
+        val buffer = ByteArray(8 * 1024)
+        var totalBytes = 0
+        while (true) {
+            val count = stream.read(buffer)
+            if (count < 0) break
+            totalBytes += count
+            if (totalBytes > PROFILE_PHOTO_MAX_BYTES) return null
+            output.write(buffer, 0, count)
+        }
+    }
+    return output.toByteArray().takeIf { it.isNotEmpty() }?.let { contentType to it }
 }
 
 @Composable

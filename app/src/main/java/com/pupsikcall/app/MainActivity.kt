@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -397,9 +399,6 @@ private fun HailToneApp(
     }
     val appSettingsState by appSettingsRepository.state.collectAsState()
     val appSettings = (appSettingsState as? AppSettingsState.Ready)?.settings ?: AppSettings()
-    var verifiedAutoAnswerContacts by remember(authenticatedUserId) {
-        mutableStateOf<List<HailToneContactLink>>(emptyList())
-    }
     val profileRepository = remember(signaling) { AuthenticatedProfileRepository(signaling.authClient) }
     val profileState by profileRepository.state.collectAsState()
     val phoneVerificationController = remember(signaling) {
@@ -426,18 +425,6 @@ private fun HailToneApp(
         ) {
             pendingRegistrationPhone = null
             pendingRegistrationEmail = null
-        }
-    }
-
-    LaunchedEffect(authenticatedUserId, screen) {
-        verifiedAutoAnswerContacts = emptyList()
-        if (authenticatedUserId != null && screen == DemoScreen.Settings) {
-            val linkedContacts = runCatching {
-                SupabaseHailToneContactDirectoryBackend(signaling.authClient).listLinkedContacts()
-            }.getOrDefault(emptyList())
-            if (signaling.authenticatedUserId() == authenticatedUserId) {
-                verifiedAutoAnswerContacts = linkedContacts
-            }
         }
     }
 
@@ -916,7 +903,7 @@ private fun HailToneApp(
                         onLogout = logout,
                     )
                 } else when (screen) {
-                    DemoScreen.SignIn, DemoScreen.Contacts -> HailToneContactsScreen(
+                    DemoScreen.SignIn, DemoScreen.Contacts -> HailToneRegisteredContactsScreen(
                         profileName = (profileState as? AuthenticatedProfileState.Profile)
                             ?.takeIf { it.identity.userId == authenticatedUserId && it.profile.userId == authenticatedUserId }
                             ?.profile?.displayName.orEmpty(),
@@ -924,12 +911,37 @@ private fun HailToneApp(
                         onOpenMessages = { screen = DemoScreen.Messages },
                         onOpenSettings = { screen = DemoScreen.Settings },
                         onOpenProfile = { screen = DemoScreen.Profile },
-                        identityMatcher = contactDirectory,
-                        onCreateInvite = contactDirectory::createInviteFor,
-                        onAcceptInvite = contactDirectory::acceptInviteFor,
-                        onLoadBlockedContacts = contactDirectory::listBlockedContacts,
+                        onLoadContacts = contactDirectory::listLinkedContacts,
+                        onLoadRequests = contactDirectory::listContactRequests,
+                        onSearchAccounts = contactDirectory::searchAccounts,
+                        onSendRequest = contactDirectory::sendContactRequest,
+                        onAcceptRequest = contactDirectory::acceptContactRequest,
+                        onDeclineRequest = contactDirectory::declineContactRequest,
+                        onCancelRequest = contactDirectory::cancelContactRequest,
                         onBlockContact = contactDirectory::blockResolvedContact,
                         onUnblockContact = contactDirectory::unblockResolvedContact,
+                        trustedAutoAnswerUserIds = appSettings.trustedAutoAnswerUserIds,
+                        onTrustedContactChange = { userId, trusted ->
+                            authScope.launch {
+                                val expectedUserId = authenticatedUserId ?: return@launch
+                                if (signaling.authenticatedUserId() != expectedUserId) return@launch
+                                if (trusted) {
+                                    val verifiedContact = runCatching {
+                                        SupabaseHailToneContactDirectoryBackend(signaling.authClient)
+                                            .listLinkedContacts()
+                                            .firstOrNull { it.account.userId == userId }
+                                    }.getOrNull() ?: return@launch
+                                    if (signaling.authenticatedUserId() != expectedUserId) return@launch
+                                    appSettingsRepository.addTrustedAuthenticatedUser(
+                                        userId = verifiedContact.account.userId,
+                                        currentUserId = expectedUserId,
+                                        matchedAuthenticatedUserId = verifiedContact.account.userId,
+                                    )
+                                } else {
+                                    appSettingsRepository.removeTrustedUser(userId)
+                                }
+                            }
+                        },
                         onCallContact = { userId, verifiedName -> startAuthenticatedCall(userId, verifiedName) },
                         onMessageContact = { userId ->
                             authScope.launch {
@@ -1016,29 +1028,8 @@ private fun HailToneApp(
                         profileState = profileState,
                         onAutoAnswerEnabledChange = { enabled -> authScope.launch { appSettingsRepository.setAutoAnswerEnabled(enabled) } },
                         onAutoAnswerDelayChange = { delay -> authScope.launch { appSettingsRepository.setAutoAnswerDelay(delay) } },
-                        onRemoveTrustedUser = { userId -> authScope.launch { appSettingsRepository.removeTrustedUser(userId) } },
-                        verifiedContacts = verifiedAutoAnswerContacts,
-                        onTrustedContactChange = { userId, trusted ->
-                            authScope.launch {
-                                val expectedUserId = authenticatedUserId ?: return@launch
-                                if (signaling.authenticatedUserId() != expectedUserId) return@launch
-                                if (trusted) {
-                                    val verifiedContact = runCatching {
-                                        SupabaseHailToneContactDirectoryBackend(signaling.authClient)
-                                            .listLinkedContacts()
-                                            .firstOrNull { it.account.userId == userId }
-                                    }.getOrNull() ?: return@launch
-                                    if (signaling.authenticatedUserId() != expectedUserId) return@launch
-                                    appSettingsRepository.addTrustedAuthenticatedUser(
-                                        userId = verifiedContact.account.userId,
-                                        currentUserId = expectedUserId,
-                                        matchedAuthenticatedUserId = verifiedContact.account.userId,
-                                    )
-                                } else {
-                                    appSettingsRepository.removeTrustedUser(userId)
-                                }
-                            }
-                        },
+                        onLoadBlockedContacts = contactDirectory::listBlockedContacts,
+                        onUnblockContact = contactDirectory::unblockResolvedContact,
                         languageCodes = languageCodes,
                         languageNames = languageNames,
                         selectedLanguageIndex = selectedLanguageIndex,
@@ -1056,6 +1047,8 @@ private fun HailToneApp(
                         onLogout = logout,
                         onRetry = profileRepository::reload,
                         onSaveDisplayName = { name -> profileRepository.updateDisplayName(name) },
+                        onSaveUsername = profileRepository::updateUsername,
+                        onSavePhoto = profileRepository::uploadPhoto,
                         onLoadPhone = phoneVerificationController::load,
                         onRequestPhone = phoneVerificationController::requestVerification,
                         onResendPhone = phoneVerificationController::resendVerification,
@@ -1132,6 +1125,7 @@ private fun SignInScreen(
         modifier = Modifier
             .fillMaxSize()
             .imePadding()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 28.dp, vertical = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,

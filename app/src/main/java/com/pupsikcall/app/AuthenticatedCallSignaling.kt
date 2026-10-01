@@ -15,6 +15,7 @@ import io.github.jan.supabase.realtime.broadcastFlow
 import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.realtime
+import io.github.jan.supabase.storage.Storage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -475,6 +476,7 @@ internal class AuthenticatedCallSignaling(
                 }
                 install(Realtime)
                 install(Postgrest)
+                install(Storage)
             }
         }
 

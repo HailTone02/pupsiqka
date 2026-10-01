@@ -48,6 +48,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -93,9 +94,10 @@ internal fun HailToneContactsScreen(
     identityMatcher: SelectedContactIdentityMatcher?,
     onCreateInvite: suspend (LocalPhoneContact) -> ContactInviteCapability,
     onAcceptInvite: suspend (LocalPhoneContact, String) -> HailToneContactLink,
-    onLoadBlockedContacts: suspend () -> List<HailToneContactLink>,
     onBlockContact: suspend (UUID) -> Unit,
     onUnblockContact: suspend (UUID) -> Unit,
+    trustedAutoAnswerUserIds: Set<UUID>,
+    onTrustedContactChange: (UUID, Boolean) -> Unit,
     onCallContact: (UUID, String?) -> Unit,
     onMessageContact: (UUID) -> Unit,
 ) {
@@ -117,7 +119,6 @@ internal fun HailToneContactsScreen(
     var showAddContact by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var operationFailed by remember { mutableStateOf(false) }
-    var showBlockedContacts by remember { mutableStateOf(false) }
 
     val contactEditorLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         reloadKey += 1
@@ -196,9 +197,6 @@ internal fun HailToneContactsScreen(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { showAddContact = true }) {
                     Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.contact_add), tint = palette.bronze)
-                }
-                IconButton(onClick = { showBlockedContacts = true }) {
-                    Icon(Icons.Filled.Person, contentDescription = stringResource(R.string.contact_blocked_list), tint = palette.muted)
                 }
                 IconButton(onClick = onOpenSettings) {
                     Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings), tint = palette.muted)
@@ -351,6 +349,8 @@ internal fun HailToneContactsScreen(
             onAcceptInvite = onAcceptInvite,
             onBlock = onBlockContact,
             onUnblock = onUnblockContact,
+            trustedAutoAnswer = accountUserId(identityResolution)?.let { it in trustedAutoAnswerUserIds } == true,
+            onTrustedContactChange = onTrustedContactChange,
             onDelete = { confirmDelete = true },
             onRetryIdentity = {
                 identityRetry += 1
@@ -384,17 +384,10 @@ internal fun HailToneContactsScreen(
         )
     }
 
-    if (showBlockedContacts) {
-        BlockedContactsDialog(
-            onDismiss = { showBlockedContacts = false },
-            onLoad = onLoadBlockedContacts,
-            onUnblock = { userId ->
-                onUnblockContact(userId)
-                identityRetry += 1
-            },
-        )
-    }
 }
+
+private fun accountUserId(resolution: ContactIdentityResolution): UUID? =
+    (resolution as? ContactIdentityResolution.Resolved)?.account?.userId
 
 @Composable
 private fun ColumnScope.PermissionRequiredContent(status: ContactsPermissionStatus, onAction: () -> Unit) {
@@ -503,6 +496,8 @@ private fun ContactDetailsDialog(
     onAcceptInvite: suspend (LocalPhoneContact, String) -> HailToneContactLink,
     onBlock: suspend (UUID) -> Unit,
     onUnblock: suspend (UUID) -> Unit,
+    trustedAutoAnswer: Boolean,
+    onTrustedContactChange: (UUID, Boolean) -> Unit,
     onDelete: () -> Unit,
     onRetryIdentity: () -> Unit,
 ) {
@@ -550,6 +545,20 @@ private fun ContactDetailsDialog(
                     TextButton(onClick = onRetryIdentity) { Text(stringResource(R.string.contacts_retry)) }
                 }
                 if (account != null && !account.blockedByMe && !account.blockedMe) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = HailToneSpacing.small),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.trusted_auto_answer_contacts), color = LocalHailTonePalette.current.text)
+                            Text(stringResource(R.string.trusted_auto_answer_explanation), color = LocalHailTonePalette.current.muted, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(
+                            checked = trustedAutoAnswer,
+                            onCheckedChange = { onTrustedContactChange(account.userId, it) },
+                        )
+                    }
                     TextButton(onClick = { onCall(account.userId, account.displayName) }) {
                         Text(stringResource(R.string.contact_call))
                     }
@@ -664,13 +673,13 @@ private fun ContactDetailsDialog(
 }
 
 @Composable
-private fun BlockedContactsDialog(
+internal fun HailToneBlockedContactsDialog(
     onDismiss: () -> Unit,
-    onLoad: suspend () -> List<HailToneContactLink>,
+    onLoad: suspend () -> List<MatchedHailToneAccount>,
     onUnblock: suspend (UUID) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var contacts by remember { mutableStateOf<List<HailToneContactLink>?>(null) }
+    var contacts by remember { mutableStateOf<List<MatchedHailToneAccount>?>(null) }
     var loading by remember { mutableStateOf(true) }
     var failed by remember { mutableStateOf(false) }
     var workingUserId by remember { mutableStateOf<UUID?>(null) }
@@ -698,20 +707,20 @@ private fun BlockedContactsDialog(
                 failed -> Text(stringResource(R.string.contact_blocked_load_failed))
                 contacts.isNullOrEmpty() -> Text(stringResource(R.string.contact_blocked_empty))
                 else -> Column(Modifier.verticalScroll(rememberScrollState())) {
-                    contacts.orEmpty().forEach { linked ->
+                    contacts.orEmpty().forEach { account ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            Text(linked.account.displayName ?: stringResource(R.string.profile_name_not_set), modifier = Modifier.weight(1f))
+                            Text(account.displayName ?: stringResource(R.string.profile_name_not_set), modifier = Modifier.weight(1f))
                             TextButton(
                                 enabled = workingUserId == null,
                                 onClick = {
                                     scope.launch {
-                                        workingUserId = linked.account.userId
+                                        workingUserId = account.userId
                                         try {
-                                            onUnblock(linked.account.userId)
+                                            onUnblock(account.userId)
                                             reload()
                                         } catch (_: Exception) {
                                             failed = true

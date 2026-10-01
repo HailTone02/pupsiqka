@@ -53,6 +53,7 @@ internal fun PhoneVerificationSection(
 
     LaunchedEffect(state) {
         val hasOtp = state == PhoneVerificationState.AwaitingOtp ||
+            state == PhoneVerificationState.Verifying ||
             (state is PhoneVerificationState.Error && state.reason == PhoneVerificationError.CODE_INVALID_EXPIRED_OR_RATE_LIMITED)
         if (hasOtp) {
             while (true) {
@@ -98,7 +99,7 @@ internal fun PhoneVerificationSection(
                     Text(stringResource(R.string.phone_change_number), color = palette.bronze)
                 }
             }
-            state == PhoneVerificationState.AwaitingOtp ||
+            state == PhoneVerificationState.AwaitingOtp || state == PhoneVerificationState.Verifying ||
                 (state is PhoneVerificationState.Error && state.reason == PhoneVerificationError.CODE_INVALID_EXPIRED_OR_RATE_LIMITED) -> {
                 if (state is PhoneVerificationState.Error) {
                     Text(phoneErrorString(state.reason), color = palette.danger, style = MaterialTheme.typography.bodyMedium)
@@ -108,6 +109,7 @@ internal fun PhoneVerificationSection(
                     value = otpInput,
                     onValueChange = { value -> otpInput = value.filter { it in '0'..'9' }.take(8) },
                     modifier = Modifier.fillMaxWidth().padding(top = HailToneSpacing.small),
+                    enabled = state != PhoneVerificationState.Verifying,
                     label = { Text(stringResource(R.string.phone_code_hint)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
@@ -123,17 +125,20 @@ internal fun PhoneVerificationSection(
                     Button(
                         onClick = {
                             val submittedOtp = otpInput
-                            otpInput = ""
                             scope.launch { onVerify(submittedOtp) }
                         },
-                        enabled = otpInput.isNotBlank(),
+                        enabled = otpInput.isNotBlank() && state != PhoneVerificationState.Verifying,
                         colors = ButtonDefaults.buttonColors(containerColor = palette.bronze),
                     ) {
-                        Text(stringResource(R.string.phone_verify_code))
+                        if (state == PhoneVerificationState.Verifying) {
+                            CircularProgressIndicator(Modifier.size(16.dp), color = palette.text, strokeWidth = 2.dp)
+                        } else {
+                            Text(stringResource(R.string.phone_verify_code))
+                        }
                     }
                     TextButton(
                         onClick = { scope.launch { onResend() } },
-                        enabled = remainingCooldownSeconds == 0,
+                        enabled = remainingCooldownSeconds == 0 && state != PhoneVerificationState.Verifying,
                     ) {
                         Text(
                             if (remainingCooldownSeconds > 0) stringResource(R.string.phone_resend_cooldown, remainingCooldownSeconds)
@@ -184,6 +189,10 @@ internal fun PhoneVerificationSection(
 private fun phoneErrorString(reason: PhoneVerificationError): String = when (reason) {
     PhoneVerificationError.INVALID_PHONE -> stringResource(R.string.phone_invalid_number)
     PhoneVerificationError.REQUEST_FAILED -> stringResource(R.string.phone_request_failed)
+    PhoneVerificationError.NETWORK_FAILED -> stringResource(R.string.phone_network_failed)
+    PhoneVerificationError.RATE_LIMITED -> stringResource(R.string.phone_rate_limited)
+    PhoneVerificationError.PROVIDER_CONFIGURATION_FAILED -> stringResource(R.string.phone_provider_configuration_failed)
+    PhoneVerificationError.SUPABASE_REJECTED -> stringResource(R.string.phone_supabase_rejected)
     PhoneVerificationError.CODE_INVALID_EXPIRED_OR_RATE_LIMITED -> stringResource(R.string.phone_code_failed)
     PhoneVerificationError.STATUS_CHECK_FAILED -> stringResource(R.string.phone_status_failed)
     PhoneVerificationError.SESSION_LOST -> stringResource(R.string.phone_session_lost)

@@ -4,7 +4,11 @@ import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.postgrest.rpc
+import io.github.jan.supabase.storage.storage
+import io.ktor.http.ContentType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -93,6 +97,22 @@ internal enum class ProfileUpdateResult {
     FAILED,
 }
 
+internal enum class ProfileUsernameUpdateResult {
+    UPDATED,
+    INVALID,
+    COOLDOWN,
+    TAKEN,
+    NOT_AUTHENTICATED,
+    FAILED,
+}
+
+internal enum class ProfilePhotoUpdateResult {
+    UPDATED,
+    INVALID_PHOTO,
+    NOT_AUTHENTICATED,
+    FAILED,
+}
+
 internal sealed interface ProfileSessionEvent {
     data object Loading : ProfileSessionEvent
     data object SignedOut : ProfileSessionEvent
@@ -127,6 +147,8 @@ internal fun profileInitials(displayName: String?, email: String?): String {
 internal interface ProfileGateway {
     suspend fun load(userId: UUID): UserProfile?
     suspend fun updateDisplayName(userId: UUID, displayName: String): UserProfile?
+    suspend fun updateUsername(userId: UUID, username: String): UserProfile?
+    suspend fun uploadPhoto(userId: UUID, contentType: String, bytes: ByteArray): UserProfile?
 }
 
 internal class AuthenticatedProfileRepository(
@@ -208,6 +230,60 @@ internal class AuthenticatedProfileRepository(
         }
     }
 
+    suspend fun updateUsername(username: String): ProfileUsernameUpdateResult = updateMutex.withLock {
+        val current = mutableState.value as? AuthenticatedProfileState.Profile
+            ?: return@withLock ProfileUsernameUpdateResult.NOT_AUTHENTICATED
+        val normalized = normalizeHailToneUsername(username)
+        if (!Regex("^[a-z0-9_]{3,30}$").matches(normalized)) {
+            return@withLock ProfileUsernameUpdateResult.INVALID
+        }
+        if (normalized == current.profile.username) return@withLock ProfileUsernameUpdateResult.UPDATED
+        val revision = sessionRevision
+        try {
+            val updated = profiles.updateUsername(current.identity.userId, normalized)
+            if (revision != sessionRevision || (mutableState.value as? AuthenticatedProfileState.Profile)?.identity?.userId != current.identity.userId) {
+                return@withLock ProfileUsernameUpdateResult.NOT_AUTHENTICATED
+            }
+            if (updated == null || updated.userId != current.identity.userId) {
+                return@withLock ProfileUsernameUpdateResult.FAILED
+            }
+            mutableState.value = current.copy(profile = updated)
+            ProfileUsernameUpdateResult.UPDATED
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            when {
+                failure.message.orEmpty().contains("30 days", ignoreCase = true) -> ProfileUsernameUpdateResult.COOLDOWN
+                failure.message.orEmpty().contains("23505") || failure.message.orEmpty().contains("duplicate key", ignoreCase = true) -> ProfileUsernameUpdateResult.TAKEN
+                else -> ProfileUsernameUpdateResult.FAILED
+            }
+        }
+    }
+
+    suspend fun uploadPhoto(contentType: String, bytes: ByteArray): ProfilePhotoUpdateResult = updateMutex.withLock {
+        val current = mutableState.value as? AuthenticatedProfileState.Profile
+            ?: return@withLock ProfilePhotoUpdateResult.NOT_AUTHENTICATED
+        if (contentType !in PROFILE_PHOTO_CONTENT_TYPES || bytes.isEmpty() || bytes.size > PROFILE_PHOTO_MAX_BYTES) {
+            return@withLock ProfilePhotoUpdateResult.INVALID_PHOTO
+        }
+        val revision = sessionRevision
+        try {
+            val updated = profiles.uploadPhoto(current.identity.userId, contentType, bytes)
+            if (revision != sessionRevision || (mutableState.value as? AuthenticatedProfileState.Profile)?.identity?.userId != current.identity.userId) {
+                return@withLock ProfilePhotoUpdateResult.NOT_AUTHENTICATED
+            }
+            if (updated == null || updated.userId != current.identity.userId) {
+                return@withLock ProfilePhotoUpdateResult.FAILED
+            }
+            mutableState.value = current.copy(profile = updated)
+            ProfilePhotoUpdateResult.UPDATED
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (_: Throwable) {
+            ProfilePhotoUpdateResult.FAILED
+        }
+    }
+
     private suspend fun loadProfile(session: ProfileSessionEvent.Authenticated, expectedRevision: Long? = null) {
         currentSession = session
         val revision = expectedRevision ?: ++sessionRevision
@@ -268,6 +344,26 @@ private class SupabaseProfileGateway(private val client: SupabaseClient) : Profi
         return load(userId)
     }
 
+    override suspend fun updateUsername(userId: UUID, username: String): UserProfile? {
+        client.postgrest.rpc("change_profile_username", buildJsonObject {
+            put("p_username", JsonPrimitive(username))
+        })
+        return load(userId)
+    }
+
+    override suspend fun uploadPhoto(userId: UUID, contentType: String, bytes: ByteArray): UserProfile? {
+        val path = "$userId/${UUID.randomUUID()}.${contentType.substringAfter('/') }"
+        client.storage.from(PROFILE_PHOTO_BUCKET).upload(path, bytes) {
+            this.contentType = ContentType.parse(contentType)
+        }
+        client.from("profiles").update({
+            set("avatar_path", path)
+        }) {
+            filter { eq("user_id", userId.toString()) }
+        }
+        return load(userId)
+    }
+
     private fun JsonObject.stringOrNull(name: String): String? =
         (this[name] as? JsonPrimitive)?.contentOrNull
 
@@ -278,4 +374,10 @@ private class SupabaseProfileGateway(private val client: SupabaseClient) : Profi
 private object UnavailableProfileGateway : ProfileGateway {
     override suspend fun load(userId: UUID): UserProfile? = error("Supabase profile client is unavailable")
     override suspend fun updateDisplayName(userId: UUID, displayName: String): UserProfile? = error("Supabase profile client is unavailable")
+    override suspend fun updateUsername(userId: UUID, username: String): UserProfile? = error("Supabase profile client is unavailable")
+    override suspend fun uploadPhoto(userId: UUID, contentType: String, bytes: ByteArray): UserProfile? = error("Supabase profile client is unavailable")
 }
+
+internal const val PROFILE_PHOTO_BUCKET = "profile-photos"
+internal const val PROFILE_PHOTO_MAX_BYTES = 5 * 1024 * 1024
+private val PROFILE_PHOTO_CONTENT_TYPES = setOf("image/jpeg", "image/png", "image/webp")
